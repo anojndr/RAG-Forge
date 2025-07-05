@@ -1,0 +1,228 @@
+package extractor
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"web-search-api-for-llms/internal/config"
+	"web-search-api-for-llms/internal/logger"
+)
+
+// Dispatcher is responsible for identifying the type of URL and calling the appropriate extractor.
+type Dispatcher struct {
+	Config           *config.AppConfig
+	youtubeExtractor Extractor
+	redditExtractor  Extractor
+	twitterExtractor Extractor
+	pdfExtractor     Extractor
+	webpageExtractor Extractor
+}
+
+// NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
+func NewDispatcher(appConfig *config.AppConfig) *Dispatcher {
+	ytExtractor, err := NewYouTubeExtractor(appConfig)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
+		// Depending on desired behavior, you might want to panic or handle this more gracefully.
+		// For now, we'll let it proceed with a nil extractor for YouTube.
+	}
+
+	rdExtractor := NewRedditExtractor(appConfig)  // Assuming NewRedditExtractor doesn't return an error
+	twExtractor := NewTwitterExtractor(appConfig) // Initialize Twitter extractor
+	pdfExtractor := NewPDFExtractor(appConfig)    // Assuming NewPDFExtractor doesn't return an error
+	wpExtractor := NewWebpageExtractor(appConfig) // Assuming NewWebpageExtractor doesn't return an error
+
+	return &Dispatcher{
+		Config:           appConfig,
+		youtubeExtractor: ytExtractor, // This can be nil if NewYouTubeExtractor failed
+		redditExtractor:  rdExtractor,
+		twitterExtractor: twExtractor,
+		pdfExtractor:     pdfExtractor,
+		webpageExtractor: wpExtractor,
+	}
+}
+
+// DispatchAndExtract determines the URL type and calls the appropriate extractor.
+func (d *Dispatcher) DispatchAndExtract(targetURL string) (*ExtractedResult, error) {
+	return d.DispatchAndExtractWithContext(targetURL, "")
+}
+
+// DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
+func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string) (*ExtractedResult, error) {
+	log.Printf("Dispatching URL: %s from endpoint: %s", targetURL, endpoint)
+
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		wrappedErr := fmt.Errorf("failed to parse URL %s: %w", targetURL, err)
+		logger.LogError("Error: %v", wrappedErr)
+		result := &ExtractedResult{
+			URL:                   targetURL,
+			ProcessedSuccessfully: false,
+			Error:                 "Invalid URL format",
+			SourceType:            "unknown",
+		}
+		return result, wrappedErr
+	}
+
+	hostname := strings.ToLower(parsedURL.Hostname())
+
+	// 1. Check for YouTube (comprehensive domain check)
+	if strings.Contains(hostname, "youtube.com") ||
+		strings.Contains(hostname, "youtu.be") ||
+		strings.Contains(hostname, "youtube-nocookie.com") ||
+		strings.Contains(hostname, "music.youtube.com") ||
+		strings.Contains(hostname, "gaming.youtube.com") ||
+		strings.Contains(hostname, "tv.youtube.com") ||
+		strings.Contains(hostname, "m.youtube.com") {
+		log.Printf("Identified %s as YouTube URL", targetURL)
+		if d.youtubeExtractor != nil {
+			result, err := d.youtubeExtractor.Extract(targetURL)
+			if err != nil {
+				return result, fmt.Errorf("youtube extraction failed: %w", err)
+			}
+			return result, nil
+		}
+		result, err := d.unimplementedOrFailedInitExtractor("youtube", targetURL, d.youtubeExtractor == nil)
+		return result, err
+	}
+
+	// 2. Check for Reddit
+	if strings.Contains(hostname, "reddit.com") || strings.Contains(hostname, "redd.it") {
+		log.Printf("Identified %s as Reddit URL", targetURL)
+		if d.redditExtractor != nil {
+			result, err := d.redditExtractor.Extract(targetURL)
+			if err != nil {
+				return result, fmt.Errorf("reddit extraction failed: %w", err)
+			}
+			return result, nil
+		}
+		result, err := d.unimplementedOrFailedInitExtractor("reddit", targetURL, d.redditExtractor == nil)
+		return result, err
+	}
+
+	// 3. Check for Twitter/X (only for /extract endpoint)
+	if isTwitterDomain(hostname) {
+		log.Printf("Identified %s as Twitter/X URL", targetURL)
+
+		// Only process Twitter URLs via /extract endpoint
+		if endpoint != "/extract" {
+			log.Printf("Twitter extraction skipped - only available via /extract endpoint")
+			result := &ExtractedResult{
+				URL:                   targetURL,
+				SourceType:            "twitter",
+				ProcessedSuccessfully: false,
+				Error:                 "Twitter extraction is only available via /extract endpoint",
+			}
+			return result, fmt.Errorf("twitter extraction is only available via /extract endpoint")
+		}
+
+		if d.twitterExtractor != nil {
+			result, err := d.twitterExtractor.Extract(targetURL)
+			if err != nil {
+				return result, fmt.Errorf("twitter extraction failed: %w", err)
+			}
+			return result, nil
+		}
+		result, err := d.unimplementedOrFailedInitExtractor("twitter", targetURL, d.twitterExtractor == nil)
+		return result, err
+	}
+
+	// 4. Check for PDF (by Content-Type or .pdf extension)
+	isPDF := false
+	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
+		isPDF = true
+		log.Printf("Identified %s as potential PDF by extension", targetURL)
+	}
+
+	// Optimize PDF detection: only do HEAD request if we really need to
+	// Skip HEAD request for common non-PDF domains to improve performance
+	if !isPDF && !isLikelyNonPDFDomain(hostname) {
+		// Use a shorter timeout for HEAD requests to avoid delays
+		headClient := &http.Client{Timeout: 3 * time.Second}
+		headResp, err := headClient.Head(targetURL)
+		if err == nil {
+			contentType := headResp.Header.Get("Content-Type")
+			if err := headResp.Body.Close(); err != nil {
+				log.Printf("Warning: failed to close HEAD response body: %v", err)
+			}
+			log.Printf("Content-Type for %s: %s", targetURL, contentType)
+			if strings.Contains(strings.ToLower(contentType), "application/pdf") {
+				isPDF = true
+				log.Printf("Confirmed %s as PDF by Content-Type", targetURL)
+			}
+		} else {
+			logger.LogError("Error making HEAD request to %s: %v. Proceeding based on extension or as general webpage.", targetURL, err)
+		}
+	}
+
+	if isPDF {
+		log.Printf("Identified %s as PDF URL", targetURL)
+		if d.pdfExtractor != nil {
+			result, err := d.pdfExtractor.Extract(targetURL)
+			if err != nil {
+				return result, fmt.Errorf("pdf extraction failed: %w", err)
+			}
+			return result, nil
+		}
+		result, err := d.unimplementedOrFailedInitExtractor("pdf", targetURL, d.pdfExtractor == nil)
+		return result, err
+	}
+
+	// 5. Default to General Web Page Extractor
+	log.Printf("Identified %s as general webpage URL", targetURL)
+	if d.webpageExtractor != nil {
+		result, err := d.webpageExtractor.Extract(targetURL)
+		if err != nil {
+			return result, fmt.Errorf("webpage extraction failed: %w", err)
+		}
+		return result, nil
+	}
+	result, err := d.unimplementedOrFailedInitExtractor("webpage", targetURL, d.webpageExtractor == nil)
+	return result, err
+}
+
+func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL string, initFailed bool) (*ExtractedResult, error) {
+	var errMsg string
+	if initFailed {
+		errMsg = fmt.Sprintf("%s extractor failed to initialize", sourceType)
+	} else {
+		errMsg = fmt.Sprintf("%s extractor not implemented (this should not happen if init was attempted)", sourceType)
+	}
+	log.Printf(errMsg + " for URL: " + targetURL)
+	return &ExtractedResult{
+		URL:                   targetURL,
+		SourceType:            sourceType,
+		ProcessedSuccessfully: false,
+		Error:                 errMsg,
+	}, fmt.Errorf("%s", errMsg)
+}
+
+// isLikelyNonPDFDomain checks if a domain is unlikely to serve PDFs directly
+func isLikelyNonPDFDomain(hostname string) bool {
+	nonPDFDomains := []string{
+		// YouTube domains
+		"youtube.com", "youtu.be", "youtube-nocookie.com", "music.youtube.com",
+		"gaming.youtube.com", "tv.youtube.com", "m.youtube.com",
+		// Reddit domains
+		"reddit.com", "redd.it",
+		// Social media and other platforms
+		"twitter.com", "x.com", "facebook.com", "instagram.com", "tiktok.com",
+		"github.com", "stackoverflow.com", "medium.com", "linkedin.com",
+		"wikipedia.org", "wikimedia.org", "google.com", "bing.com",
+		"news.ycombinator.com", "hackernews.com", "techcrunch.com",
+		"wired.com", "theverge.com", "arstechnica.com", "engadget.com",
+		"bloomberg.com", "reuters.com", "cnn.com", "bbc.com", "nytimes.com",
+		"wsj.com", "ft.com", "guardian.co.uk", "washingtonpost.com",
+	}
+
+	for _, domain := range nonPDFDomains {
+		if strings.Contains(hostname, domain) {
+			return true
+		}
+	}
+	return false
+}

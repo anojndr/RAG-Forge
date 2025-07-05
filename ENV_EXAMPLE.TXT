@@ -1,0 +1,80 @@
+# Web Search API for LLMs - Environment Configuration
+
+# =============================================================================
+# SERVER CONFIGURATION
+# =============================================================================
+
+# Port for the HTTP server (default: 8080)
+PORT=8080
+
+# =============================================================================
+# SEARCH ENGINE CONFIGURATION
+# =============================================================================
+
+# Primary search engine to use (default: searxng)
+# Valid values: searxng, serper
+MAIN_SEARCH_ENGINE=searxng
+
+# Fallback search engine when primary fails (default: serper)
+# Valid values: searxng, serper, or leave empty for no fallback
+FALLBACK_SEARCH_ENGINE=serper
+
+# =============================================================================
+# SEARXNG CONFIGURATION
+# =============================================================================
+
+# URL of your SearxNG instance (default: http://localhost:18088)
+SEARXNG_URL=http://localhost:18088
+
+# =============================================================================
+# SERPER API CONFIGURATION
+# =============================================================================
+
+# Serper.dev API key for Google Search API (optional)
+# Get your API key at: https://serper.dev/
+SERPER_API_KEY=your_serper_api_key_here
+
+# Serper API endpoint URL (default: https://google.serper.dev/search)
+SERPER_API_URL=https://google.serper.dev/search
+
+# =============================================================================
+# YOUTUBE API CONFIGURATION
+# =============================================================================
+
+# YouTube Data API key for metadata and comments (optional)
+# Get your API key at: https://console.developers.google.com/
+YOUTUBE_API_KEY=your_youtube_api_key_here
+
+# Order of transcript extraction methods (comma-separated)
+# Valid entries: ytapi (youtube-transcript-api), tactiq
+# Example prioritizing Tactiq first:
+# YOUTUBE_TRANSCRIPT_ORDER=tactiq,ytapi
+YOUTUBE_TRANSCRIPT_ORDER=ytapi,tactiq
+
+# =============================================================================
+# REDDIT API CONFIGURATION
+# =============================================================================
+
+# Reddit API credentials for post extraction (optional)
+# Get your credentials at: https://www.reddit.com/prefs/apps
+REDDIT_CLIENT_ID=your_reddit_client_id_here
+REDDIT_CLIENT_SECRET=your_reddit_client_secret_here
+REDDIT_USER_AGENT=WebSearchApiGo/1.0
+
+# =============================================================================
+# TWITTER/X EXTRACTION CONFIGURATION
+# =============================================================================
+
+# Twitter/X login credentials for browser automation (required for Twitter/X URLs)
+# This is necessary because the public API is heavily restricted.
+TWITTER_USERNAME=your_twitter_username_or_email
+TWITTER_PASSWORD=your_twitter_password
+
+# =============================================================================
+# WEBSHARE PROXY CONFIGURATION (Optional)
+# =============================================================================
+
+# Webshare proxy credentials for YouTube Transcript API (optional)
+# Can help avoid rate-limiting on transcript extraction.
+WEBSHARE_PROXY_USERNAME=your_webshare_username_here
+WEBSHARE_PROXY_PASSWORD=your_webshare_password_here
