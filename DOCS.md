@@ -149,10 +149,11 @@ Extracts content directly from a list of provided URLs.
 -   **Request Body**: `application/json`
 
 **Request Payload:**
-| Field              | Type           | Description                                                              | Required |
-| ------------------ | -------------- | ------------------------------------------------------------------------ | -------- |
-| `urls`             | array of strings | An array of URLs to extract content from. Maximum of 20 URLs per request. | Yes      |
-| `max_char_per_url` | integer        | Optional. Truncates the content of each result to this character limit.    | No       |
+| Field                   | Type           | Description                                                                                                                            | Required |
+| ----------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `urls`                  | array of strings | An array of URLs to extract content from. Maximum of 20 URLs per request.                                                              | Yes      |
+| `max_char_per_url`      | integer        | Optional. Truncates the content of each result to this character limit.                                                                    | No       |
+| `use_headless_browser`  | boolean        | Optional. Defaults to `true`. If `false`, disables the headless browser and uses a simpler, faster HTTP-based extractor. | No       |
 
 **Example Request:**
 ```bash
@@ -197,13 +198,13 @@ This object represents the outcome of processing a single URL. It's a common com
 | Field                   | Type        | Description                                                                                             |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | `url`                   | string      | The URL that was processed.                                                                             |
-| `source_type`           | string      | The detected type of content: `youtube`, `reddit`, `pdf`, `twitter`, or `webpage`.                      |
+| `source_type`           | string      | The detected type of content: `youtube`, `reddit`, `pdf`, `twitter`, `webpage`, or `webpage_js`.        |
 | `processed_successfully`| boolean     | `true` if content was extracted successfully, `false` otherwise.                                        |
 | `data`                  | object      | The extracted content. The structure of this object depends on the `source_type`. See below.            |
 | `error`                 | string      | An error message if `processed_successfully` is `false`. `null` otherwise.                              |
 
 **`data` Object Structures by `source_type`:**
--   **`webpage`**: `{ "title": "...", "text_content": "..." }`
+-   **`webpage` / `webpage_js`**: `{ "title": "...", "text_content": "..." }`
 -   **`pdf`**: `{ "text_content": "..." }`
 -   **`youtube`**: `{ "title": "...", "channel_name": "...", "transcript": "...", "comments": [...] }`
 -   **`reddit`**: `{ "post_title": "...", "post_body": "...", "score": ..., "author": "...", "comments": [...] }`

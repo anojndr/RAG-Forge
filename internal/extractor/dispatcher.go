@@ -14,12 +14,13 @@ import (
 
 // Dispatcher is responsible for identifying the type of URL and calling the appropriate extractor.
 type Dispatcher struct {
-	Config           *config.AppConfig
-	youtubeExtractor Extractor
-	redditExtractor  Extractor
-	twitterExtractor Extractor
-	pdfExtractor     Extractor
-	webpageExtractor Extractor
+	Config             *config.AppConfig
+	youtubeExtractor   Extractor
+	redditExtractor    Extractor
+	twitterExtractor   Extractor
+	pdfExtractor       Extractor
+	webpageExtractor   Extractor
+	jsWebpageExtractor Extractor
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
@@ -31,28 +32,30 @@ func NewDispatcher(appConfig *config.AppConfig) *Dispatcher {
 		// For now, we'll let it proceed with a nil extractor for YouTube.
 	}
 
-	rdExtractor := NewRedditExtractor(appConfig)  // Assuming NewRedditExtractor doesn't return an error
-	twExtractor := NewTwitterExtractor(appConfig) // Initialize Twitter extractor
-	pdfExtractor := NewPDFExtractor(appConfig)    // Assuming NewPDFExtractor doesn't return an error
-	wpExtractor := NewWebpageExtractor(appConfig) // Assuming NewWebpageExtractor doesn't return an error
+	rdExtractor := NewRedditExtractor(appConfig)
+	twExtractor := NewTwitterExtractor(appConfig)
+	pdfExtractor := NewPDFExtractor(appConfig)
+	wpExtractor := NewWebpageExtractor(appConfig)
+	jsWpExtractor := NewJSWebpageExtractor(appConfig)
 
 	return &Dispatcher{
-		Config:           appConfig,
-		youtubeExtractor: ytExtractor, // This can be nil if NewYouTubeExtractor failed
-		redditExtractor:  rdExtractor,
-		twitterExtractor: twExtractor,
-		pdfExtractor:     pdfExtractor,
-		webpageExtractor: wpExtractor,
+		Config:             appConfig,
+		youtubeExtractor:   ytExtractor, // This can be nil if NewYouTubeExtractor failed
+		redditExtractor:    rdExtractor,
+		twitterExtractor:   twExtractor,
+		pdfExtractor:       pdfExtractor,
+		webpageExtractor:   wpExtractor,
+		jsWebpageExtractor: jsWpExtractor,
 	}
 }
 
 // DispatchAndExtract determines the URL type and calls the appropriate extractor.
 func (d *Dispatcher) DispatchAndExtract(targetURL string) (*ExtractedResult, error) {
-	return d.DispatchAndExtractWithContext(targetURL, "")
+	return d.DispatchAndExtractWithContext(targetURL, "", false)
 }
 
 // DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
-func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string) (*ExtractedResult, error) {
+func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, useHeadlessBrowser bool) (*ExtractedResult, error) {
 	log.Printf("Dispatching URL: %s from endpoint: %s", targetURL, endpoint)
 
 	parsedURL, err := url.Parse(targetURL)
@@ -174,6 +177,19 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	// 5. Default to General Web Page Extractor
 	log.Printf("Identified %s as general webpage URL", targetURL)
+	if useHeadlessBrowser && endpoint == "/extract" {
+		log.Printf("Using headless browser for %s", targetURL)
+		if d.jsWebpageExtractor != nil {
+			result, err := d.jsWebpageExtractor.Extract(targetURL)
+			if err != nil {
+				return result, fmt.Errorf("js webpage extraction failed: %w", err)
+			}
+			return result, nil
+		}
+		result, err := d.unimplementedOrFailedInitExtractor("webpage_js", targetURL, d.jsWebpageExtractor == nil)
+		return result, err
+	}
+
 	if d.webpageExtractor != nil {
 		result, err := d.webpageExtractor.Extract(targetURL)
 		if err != nil {

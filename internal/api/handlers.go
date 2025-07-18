@@ -34,8 +34,9 @@ type FinalResponsePayload struct {
 
 // ExtractRequestPayload defines the expected JSON structure for the /extract endpoint.
 type ExtractRequestPayload struct {
-	URLs          []string `json:"urls"`                       // Array of URLs to extract content from
-	MaxCharPerURL *int     `json:"max_char_per_url,omitempty"` // Max chars allowed per URL content, nil means infinite
+	URLs               []string `json:"urls"`                                   // Array of URLs to extract content from
+	MaxCharPerURL      *int     `json:"max_char_per_url,omitempty"`             // Max chars allowed per URL content, nil means infinite
+	UseHeadlessBrowser *bool    `json:"use_headless_browser,omitempty"` // Whether to use a headless browser for JS-heavy sites. Defaults to true.
 }
 
 // ExtractResponsePayload defines the structure for the /extract endpoint response.
@@ -133,7 +134,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			log.Printf("Processing: %s", url)
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search")
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false) // Headless browser is not used for /search
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
@@ -279,7 +280,11 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			log.Printf("Processing: %s", url)
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract")
+			useHeadless := true // Default to true
+			if reqPayload.UseHeadlessBrowser != nil {
+				useHeadless = *reqPayload.UseHeadlessBrowser
+			}
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", useHeadless)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
