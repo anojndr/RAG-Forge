@@ -74,13 +74,14 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	hostname := strings.ToLower(parsedURL.Hostname())
 
 	// 1. Check for YouTube (comprehensive domain check)
-	if strings.Contains(hostname, "youtube.com") ||
+	if (strings.Contains(hostname, "youtube.com") ||
 		strings.Contains(hostname, "youtu.be") ||
 		strings.Contains(hostname, "youtube-nocookie.com") ||
 		strings.Contains(hostname, "music.youtube.com") ||
 		strings.Contains(hostname, "gaming.youtube.com") ||
 		strings.Contains(hostname, "tv.youtube.com") ||
-		strings.Contains(hostname, "m.youtube.com") {
+		strings.Contains(hostname, "m.youtube.com")) &&
+		!isYouTubePlaylist(parsedURL) {
 		log.Printf("Identified %s as YouTube URL", targetURL)
 		if d.youtubeExtractor != nil {
 			result, err := d.youtubeExtractor.Extract(targetURL)
@@ -240,5 +241,21 @@ func isLikelyNonPDFDomain(hostname string) bool {
 			return true
 		}
 	}
+	return false
+}
+// isYouTubePlaylist checks if a given URL is a YouTube playlist.
+func isYouTubePlaylist(parsedURL *url.URL) bool {
+	// A URL is a playlist if the path contains "/playlist"
+	if strings.Contains(parsedURL.Path, "/playlist") {
+		return true
+	}
+
+	// A URL is also a playlist if it has a "list" query parameter
+	// but not a "v" (video) parameter.
+	queryParams := parsedURL.Query()
+	if queryParams.Get("list") != "" && queryParams.Get("v") == "" {
+		return true
+	}
+
 	return false
 }
