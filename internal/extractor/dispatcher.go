@@ -51,6 +51,7 @@ func NewDispatcher(appConfig *config.AppConfig) *Dispatcher {
 
 // DispatchAndExtract determines the URL type and calls the appropriate extractor.
 func (d *Dispatcher) DispatchAndExtract(targetURL string) (*ExtractedResult, error) {
+	// Default to not using headless browser if context is not provided.
 	return d.DispatchAndExtractWithContext(targetURL, "", false)
 }
 
@@ -178,8 +179,11 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	// 5. Default to General Web Page Extractor
 	log.Printf("Identified %s as general webpage URL", targetURL)
-	if useHeadlessBrowser && endpoint == "/extract" {
-		log.Printf("Using headless browser for %s", targetURL)
+
+	// For the /extract endpoint, use the headless browser if requested.
+	// For all other endpoints (like /search), always use the standard extractor.
+	if endpoint == "/extract" && useHeadlessBrowser {
+		log.Printf("Using JS-enabled (headless) extractor for %s on /extract", targetURL)
 		if d.jsWebpageExtractor != nil {
 			result, err := d.jsWebpageExtractor.Extract(targetURL)
 			if err != nil {
@@ -191,6 +195,8 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		return result, err
 	}
 
+	// Fallback to the standard webpage extractor for /search or when headless is not requested.
+	log.Printf("Using standard webpage extractor for %s (endpoint: %s, useHeadless: %v)", targetURL, endpoint, useHeadlessBrowser)
 	if d.webpageExtractor != nil {
 		result, err := d.webpageExtractor.Extract(targetURL)
 		if err != nil {

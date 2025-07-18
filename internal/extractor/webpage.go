@@ -53,47 +53,14 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 		pageTitle = strings.TrimSpace(h.Text)
 	})
 
-	// Extract readable text content using a more sophisticated approach
-	// First, remove non-readable elements entirely
-	c.OnHTML("script, style, noscript, nav, footer, header, aside, .sidebar, .nav, .menu, .advertisement, .ads, .social-media, .share-buttons", func(h *colly.HTMLElement) {
+	// Remove script and style elements to avoid extracting their content
+	c.OnHTML("script, style", func(h *colly.HTMLElement) {
 		h.DOM.Remove()
 	})
 
-	// Focus on main content areas and readable text elements
-	c.OnHTML("main, article, .content, .post-content, .entry-content, .main-content, div[role='main'], .article-body, .story-body", func(h *colly.HTMLElement) {
-		// Extract text from semantic elements within main content
-		h.ForEach("p, h1, h2, h3, h4, h5, h6, blockquote, pre, code, li", func(i int, elem *colly.HTMLElement) {
-			text := strings.TrimSpace(elem.Text)
-			if text != "" && len(text) > 10 { // Filter out very short text that might be noise
-				textContentBuilder.WriteString(text)
-				textContentBuilder.WriteString("\n\n")
-			}
-		})
-	})
-
-	// Fallback: if no main content areas found, extract from common readable elements
-	// but with more stringent filtering
+	// Extract all visible text from the body
 	c.OnHTML("body", func(h *colly.HTMLElement) {
-		// Only proceed if we haven't extracted much content yet
-		if textContentBuilder.Len() < 200 {
-			h.ForEach("p, h1, h2, h3, h4, h5, h6, article p, .text, .description", func(i int, elem *colly.HTMLElement) {
-				// Skip elements that are likely navigation or metadata
-				if elem.Attr("class") != "" {
-					class := strings.ToLower(elem.Attr("class"))
-					if strings.Contains(class, "nav") || strings.Contains(class, "menu") ||
-						strings.Contains(class, "footer") || strings.Contains(class, "header") ||
-						strings.Contains(class, "sidebar") || strings.Contains(class, "ad") {
-						return
-					}
-				}
-
-				text := strings.TrimSpace(elem.Text)
-				if text != "" && len(text) > 20 { // Higher threshold for fallback extraction
-					textContentBuilder.WriteString(text)
-					textContentBuilder.WriteString("\n\n")
-				}
-			})
-		}
+		textContentBuilder.WriteString(h.Text)
 	})
 
 	c.OnError(func(r *colly.Response, err error) {

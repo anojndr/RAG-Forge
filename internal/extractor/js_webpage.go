@@ -7,15 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
+	"github.com/chromedp/chromedp"
 
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 )
 
-// JSWebpageExtractor implements the Extractor interface for JS-heavy web pages.
+// JSWebpageExtractor implements the Extractor interface for general web pages that require JavaScript rendering.
 type JSWebpageExtractor struct {
 	BaseExtractor // Embed BaseExtractor for config access
 }
@@ -27,7 +25,7 @@ func NewJSWebpageExtractor(appConfig *config.AppConfig) *JSWebpageExtractor {
 	}
 }
 
-// Extract uses a headless browser to scrape visible text content and title from a webpage.
+// Extract uses a headless browser (chromedp) to get the visible text from a URL.
 func (e *JSWebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 	log.Printf("JSWebpageExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
@@ -35,77 +33,56 @@ func (e *JSWebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 		SourceType: "webpage_js",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Create a new context
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"),
+	)
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	// Launch browser with optimizations
-	launcherURL := launcher.New().
-		Headless(true).
-		Set("--disable-blink-features", "AutomationControlled").
-		Set("--no-sandbox").
-		Set("--disable-setuid-sandbox").
-		Set("--disable-gpu").
-		Set("--disable-dev-shm-usage").
-		Set("--disable-extensions").
-		Set("--disable-plugins").
-		Set("--disable-images").
-		Set("--disable-javascript-harmony-shipping").
-		Set("--disable-background-networking").
-		MustLaunch()
+	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+	defer cancel()
 
-	browser := rod.New().ControlURL(launcherURL).MustConnect()
-	defer browser.MustClose()
+	// Create a timeout
+	ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 
-	page := browser.MustPage()
-	defer page.MustClose()
+	var title, textContent string
 
-	// Set user agent
-	userAgent := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	page.MustSetUserAgent(&proto.NetworkSetUserAgentOverride{
-		UserAgent: userAgent,
-	})
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.WaitVisible("body", chromedp.ByQuery),
+		chromedp.Title(&title),
+		// Extract text from the body, trying to get only visible text
+		chromedp.Evaluate(`
+			(function() {
+				// Remove script and style tags
+				document.querySelectorAll('script, style, noscript, iframe, svg, footer, header, nav').forEach(el => el.remove());
+				// Get the text content of the body
+				return document.body.innerText;
+			})();
+		`, &textContent),
+	)
 
-	err := page.Context(ctx).Navigate(url)
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to navigate to page: %v", err)
-		logger.LogError("JSWebpageExtractor: Error for %s: %s", url, result.Error)
+		errMsg := fmt.Sprintf("chromedp execution failed: %v", err)
+		result.Error = errMsg
+		logger.LogError("JSWebpageExtractor: Error extracting %s: %s", url, errMsg)
 		return result, err
 	}
 
-	page.MustWaitLoad()
-	time.Sleep(2 * time.Second) // Wait for JS to render
-
-	// Extract page title
-	var title string
-	pageInfo, err := page.Info()
-	if err != nil {
-		log.Printf("JSWebpageExtractor: Could not get page info for %s: %v", url, err)
-	} else {
-		title = pageInfo.Title
-	}
-
-	// Extract text content
-	body, err := page.Element("body")
-	if err != nil {
-		result.Error = fmt.Sprintf("could not get body element: %v", err)
-		logger.LogError("JSWebpageExtractor: Error for %s: %s", url, result.Error)
-		return result, err
-	}
-
-	textContent, err := body.Text()
-	if err != nil {
-		result.Error = fmt.Sprintf("could not get text content: %v", err)
-		logger.LogError("JSWebpageExtractor: Error for %s: %s", url, result.Error)
-		return result, err
-	}
+	log.Printf("JSWebpageExtractor: Finished scraping %s. Title: '%s', Text length: %d", url, title, len(textContent))
 
 	result.ProcessedSuccessfully = true
 	result.Data = WebpageData{
 		TextContent: strings.TrimSpace(textContent),
 		Title:       title,
 	}
-
-	log.Printf("JSWebpageExtractor: Finished scraping %s. Title: '%s', Text length: %d", url, title, len(textContent))
 
 	return result, nil
 }

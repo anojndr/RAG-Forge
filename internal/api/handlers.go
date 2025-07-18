@@ -34,9 +34,8 @@ type FinalResponsePayload struct {
 
 // ExtractRequestPayload defines the expected JSON structure for the /extract endpoint.
 type ExtractRequestPayload struct {
-	URLs               []string `json:"urls"`                                   // Array of URLs to extract content from
-	MaxCharPerURL      *int     `json:"max_char_per_url,omitempty"`             // Max chars allowed per URL content, nil means infinite
-	UseHeadlessBrowser *bool    `json:"use_headless_browser,omitempty"` // Whether to use a headless browser for JS-heavy sites. Defaults to true.
+	URLs          []string `json:"urls"`                     // Array of URLs to extract content from
+	MaxCharPerURL *int     `json:"max_char_per_url,omitempty"` // Max chars allowed per URL content, nil means infinite
 }
 
 // ExtractResponsePayload defines the structure for the /extract endpoint response.
@@ -134,7 +133,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			log.Printf("Processing: %s", url)
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false) // Headless browser is not used for /search
+			// For /search, always use the standard, non-headless extractor for performance.
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
@@ -280,11 +280,8 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			log.Printf("Processing: %s", url)
-			useHeadless := true // Default to true
-			if reqPayload.UseHeadlessBrowser != nil {
-				useHeadless = *reqPayload.UseHeadlessBrowser
-			}
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", useHeadless)
+			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", true)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
