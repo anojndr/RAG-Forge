@@ -44,7 +44,7 @@ func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client, pytho
 }
 
 // Extract fetches title, channel, top comments, and transcript for a YouTube video.
-func (e *YouTubeExtractor) Extract(videoURL string) (*ExtractedResult, error) {
+func (e *YouTubeExtractor) Extract(videoURL string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("YouTubeExtractor: Starting extraction for URL: %s", videoURL)
 	result := &ExtractedResult{
 		URL:        videoURL,
@@ -151,6 +151,15 @@ func (e *YouTubeExtractor) Extract(videoURL string) (*ExtractedResult, error) {
 		ChannelName: channelName,
 		Comments:    commentsData,
 		Transcript:  transcriptText,
+	}
+
+	if maxChars != nil {
+		if data, ok := result.Data.(YouTubeData); ok {
+			if len(data.Transcript) > *maxChars {
+				data.Transcript = data.Transcript[:*maxChars]
+				result.Data = data
+			}
+		}
 	}
 
 	if result.ProcessedSuccessfully {

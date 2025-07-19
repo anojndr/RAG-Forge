@@ -27,7 +27,7 @@ func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtra
 }
 
 // Extract downloads a PDF from a URL and extracts its text content using a native Go library.
-func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
+func (e *PDFExtractor) Extract(url string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("PDFExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
 		URL:        url,
@@ -65,38 +65,24 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 		return result, fmt.Errorf("download failed for %s with status %s", url, resp.Status)
 	}
 
-	// 2. Buffer the entire response body to avoid re-downloading
-	content, err := io.ReadAll(resp.Body)
+	// 2. Process the response body as a stream
+	textContent, err := e.extractTextFromPDF(resp.Body, resp.ContentLength)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to read response body: %v", err)
+		// Check if the error is due to non-PDF content
+		if err == ErrNotPDF {
+			result.Error = ErrNotPDF.Error()
+			return result, ErrNotPDF
+		}
+		errMsg := fmt.Sprintf("failed to extract text from PDF stream: %v", err)
 		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error reading body for %s: %v", url, err)
-		return result, fmt.Errorf("body read failed for %s: %w", url, err)
+		logger.LogError("PDFExtractor: Error processing stream for %s: %v", url, err)
+		return result, fmt.Errorf("pdf stream processing failed for %s: %w", url, err)
 	}
 
-	// 3. Detect content type and extract accordingly
-	fileType := e.detectFileType(content)
-	log.Printf("PDFExtractor: Detected file type '%s' for URL: %s", fileType, url)
-
-	var textContent string
-	var extractionErr error
-
-	switch fileType {
-	case "pdf":
-		textContent, extractionErr = e.extractTextFromPDF(content)
-		if extractionErr != nil {
-			result.Error = extractionErr.Error()
-			return result, extractionErr
-		}
-	case "html":
-		// Return a specific error to indicate that the content is HTML, not PDF.
-		// The dispatcher will use this to fall back to the WebpageExtractor.
-		result.Error = ErrNotPDF.Error()
-		return result, ErrNotPDF
-	default:
-		err := fmt.Errorf("unsupported file type: %s", fileType)
-		result.Error = err.Error()
-		return result, err
+	// 3. Truncate content if necessary
+	if maxChars != nil && len(textContent) > *maxChars {
+		textContent = textContent[:*maxChars]
+		log.Printf("PDFExtractor: Truncated content to %d characters for %s", *maxChars, url)
 	}
 
 	log.Printf("PDFExtractor: Successfully extracted %d characters from %s", len(textContent), url)
@@ -109,25 +95,53 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 }
 
 // extractTextFromPDF extracts text from PDF content.
-func (e *PDFExtractor) extractTextFromPDF(pdfBytes []byte) (string, error) {
+func (e *PDFExtractor) extractTextFromPDF(reader io.Reader, contentLength int64) (string, error) {
+	// The pdf library requires an io.ReaderAt, so we have to buffer the whole thing in memory.
+	// This is not ideal, but it's a limitation of the library.
+	// We will at least check the content type first to avoid buffering non-PDF files.
+	buf := new(bytes.Buffer)
+	teeReader := io.TeeReader(reader, buf)
+
+	// Read a small chunk to detect content type
+	header := make([]byte, 512)
+	n, err := io.ReadFull(teeReader, header)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return "", fmt.Errorf("failed to read header: %w", err)
+	}
+	header = header[:n]
+
+	fileType := e.detectFileType(header)
+	if fileType != "pdf" {
+		return "", ErrNotPDF
+	}
+
+	// The rest of the stream is now in buf, continue reading the original reader
+	remainingReader := io.MultiReader(buf, reader)
+
+	// We still need to read the whole thing for the pdf library
+	pdfBytes, err := io.ReadAll(remainingReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read full PDF body: %w", err)
+	}
+
 	r := bytes.NewReader(pdfBytes)
 	pdfReader, err := pdf.NewReader(r, int64(len(pdfBytes)))
 	if err != nil {
 		return "", fmt.Errorf("failed to create PDF reader: %w", err)
 	}
 
-	var buf bytes.Buffer
+	var textBuf bytes.Buffer
 	b, err := pdfReader.GetPlainText()
 	if err != nil {
 		return "", fmt.Errorf("failed to get plain text from PDF: %w", err)
 	}
 
-	_, err = buf.ReadFrom(b)
+	_, err = textBuf.ReadFrom(b)
 	if err != nil {
 		return "", fmt.Errorf("failed to read text from buffer: %w", err)
 	}
 
-	return buf.String(), nil
+	return textBuf.String(), nil
 }
 
 // detectFileType examines file header to determine actual file type
@@ -165,69 +179,3 @@ func (e *PDFExtractor) detectFileType(data []byte) string {
 	return "unknown"
 }
 
-// extractFromHTML extracts text from HTML content when PDF URL returns HTML
-func (e *PDFExtractor) extractFromHTML(htmlContent, url string) (string, error) {
-	// Basic HTML text extraction - remove tags and decode entities
-	text := e.stripHTMLTags(htmlContent)
-
-	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("no text content found in HTML response from %s", url)
-	}
-
-	return text, nil
-}
-
-// stripHTMLTags performs basic HTML tag removal
-func (e *PDFExtractor) stripHTMLTags(html string) string {
-	// Remove script and style content
-	html = e.removeTagContent(html, "script")
-	html = e.removeTagContent(html, "style")
-
-	// Remove HTML tags
-	result := ""
-	inTag := false
-	for _, char := range html {
-		if char == '<' {
-			inTag = true
-		} else if char == '>' {
-			inTag = false
-		} else if !inTag {
-			result += string(char)
-		}
-	}
-
-	// Clean up whitespace
-	lines := strings.Split(result, "\n")
-	var cleanLines []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			cleanLines = append(cleanLines, line)
-		}
-	}
-
-	return strings.Join(cleanLines, "\n")
-}
-
-// removeTagContent removes content between specified tags
-func (e *PDFExtractor) removeTagContent(html, tagName string) string {
-	startTag := "<" + tagName
-	endTag := "</" + tagName + ">"
-
-	for {
-		start := strings.Index(strings.ToLower(html), startTag)
-		if start == -1 {
-			break
-		}
-
-		end := strings.Index(strings.ToLower(html[start:]), endTag)
-		if end == -1 {
-			break
-		}
-
-		end += start + len(endTag)
-		html = html[:start] + html[end:]
-	}
-
-	return html
-}

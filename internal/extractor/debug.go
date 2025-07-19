@@ -27,7 +27,7 @@ func DebugExtract() {
 		log.Fatalf("Failed to create YouTubeExtractor: %v", err)
 	}
 
-	result, err := yt.Extract("https://www.youtube.com/watch?v=RgBYohJ7mIk")
+	result, err := yt.Extract("https://www.youtube.com/watch?v=RgBYohJ7mIk", nil)
 	if err != nil {
 		log.Printf("Error extracting: %v", err)
 	}

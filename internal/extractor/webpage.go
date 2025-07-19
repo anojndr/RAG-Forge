@@ -28,7 +28,7 @@ func NewWebpageExtractor(appConfig *config.AppConfig, client *http.Client) *Webp
 }
 
 // Extract uses Colly to scrape visible text content and title from a webpage.
-func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
+func (e *WebpageExtractor) Extract(url string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("WebpageExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
 		URL:        url,
@@ -84,6 +84,15 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 	result.Data = WebpageData{
 		TextContent: strings.TrimSpace(textContentBuilder.String()),
 		Title:       pageTitle,
+	}
+
+	if maxChars != nil {
+		if data, ok := result.Data.(WebpageData); ok {
+			if len(data.TextContent) > *maxChars {
+				data.TextContent = data.TextContent[:*maxChars]
+				result.Data = data
+			}
+		}
 	}
 
 	return result, nil

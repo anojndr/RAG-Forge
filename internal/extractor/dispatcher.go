@@ -47,23 +47,23 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, pytho
 		BrowserPool:        browserPool,
 		PythonPool:         pythonPool,
 		mainHTTPClient:     client,
-		youtubeExtractor:   ytExtractor, // This can be nil if NewYouTubeExtractor failed
-		redditExtractor:    rdExtractor,
-		twitterExtractor:   twExtractor,
-		pdfExtractor:       pdfExtractor,
-		webpageExtractor:   wpExtractor,
-		jsWebpageExtractor: jsWpExtractor,
+		youtubeExtractor:   Extractor(ytExtractor), // This can be nil if NewYouTubeExtractor failed
+		redditExtractor:    Extractor(rdExtractor),
+		twitterExtractor:   Extractor(twExtractor),
+		pdfExtractor:       Extractor(pdfExtractor),
+		webpageExtractor:   Extractor(wpExtractor),
+		jsWebpageExtractor: Extractor(jsWpExtractor),
 	}
 }
 
 // DispatchAndExtract determines the URL type and calls the appropriate extractor.
-func (d *Dispatcher) DispatchAndExtract(targetURL string) (*ExtractedResult, error) {
+func (d *Dispatcher) DispatchAndExtract(targetURL string, maxChars *int) (*ExtractedResult, error) {
 	// Default to not using headless browser if context is not provided.
-	return d.DispatchAndExtractWithContext(targetURL, "", false)
+	return d.DispatchAndExtractWithContext(targetURL, "", false, maxChars)
 }
 
 // DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
-func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, useHeadlessBrowser bool) (*ExtractedResult, error) {
+func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, useHeadlessBrowser bool, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("Dispatching URL: %s from endpoint: %s", targetURL, endpoint)
 
 	parsedURL, err := url.Parse(targetURL)
@@ -92,7 +92,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		!isYouTubePlaylist(parsedURL) {
 		log.Printf("Identified %s as YouTube URL", targetURL)
 		if d.youtubeExtractor != nil {
-			result, err := d.youtubeExtractor.Extract(targetURL)
+			result, err := d.youtubeExtractor.Extract(targetURL, maxChars)
 			if err != nil {
 				return result, fmt.Errorf("youtube extraction failed: %w", err)
 			}
@@ -106,7 +106,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	if strings.Contains(hostname, "reddit.com") || strings.Contains(hostname, "redd.it") {
 		log.Printf("Identified %s as Reddit URL", targetURL)
 		if d.redditExtractor != nil {
-			result, err := d.redditExtractor.Extract(targetURL)
+			result, err := d.redditExtractor.Extract(targetURL, maxChars)
 			if err != nil {
 				return result, fmt.Errorf("reddit extraction failed: %w", err)
 			}
@@ -133,7 +133,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		}
 
 		if d.twitterExtractor != nil {
-			result, err := d.twitterExtractor.Extract(targetURL)
+			result, err := d.twitterExtractor.Extract(targetURL, maxChars)
 			if err != nil {
 				return result, fmt.Errorf("twitter extraction failed: %w", err)
 			}
@@ -145,12 +145,12 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	// 4. Optimistic PDF extraction, with fallback to webpage
 	if d.pdfExtractor != nil {
-		result, err := d.pdfExtractor.Extract(targetURL)
+		result, err := d.pdfExtractor.Extract(targetURL, maxChars)
 		if err != nil {
 			// If it's not a PDF, fall back to the webpage extractor.
 			if err == ErrNotPDF {
 				log.Printf("PDF extraction failed, falling back to webpage extractor for %s", targetURL)
-				return d.webpageExtractor.Extract(targetURL)
+				return d.webpageExtractor.Extract(targetURL, maxChars)
 			}
 			return result, fmt.Errorf("pdf extraction failed: %w", err)
 		}
@@ -166,7 +166,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	if endpoint == "/extract" && useHeadlessBrowser {
 		log.Printf("Using JS-enabled (headless) extractor for %s on /extract", targetURL)
 		if d.jsWebpageExtractor != nil {
-			result, err := d.jsWebpageExtractor.Extract(targetURL)
+			result, err := d.jsWebpageExtractor.Extract(targetURL, maxChars)
 			if err != nil {
 				return result, fmt.Errorf("js webpage extraction failed: %w", err)
 			}
@@ -179,7 +179,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	// Fallback to the standard webpage extractor for /search or when headless is not requested.
 	log.Printf("Using standard webpage extractor for %s (endpoint: %s, useHeadless: %v)", targetURL, endpoint, useHeadlessBrowser)
 	if d.webpageExtractor != nil {
-		result, err := d.webpageExtractor.Extract(targetURL)
+		result, err := d.webpageExtractor.Extract(targetURL, maxChars)
 		if err != nil {
 			return result, fmt.Errorf("webpage extraction failed: %w", err)
 		}

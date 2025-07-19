@@ -567,7 +567,7 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 }
 
 // fetchViaJSON attempts to fetch Reddit data using the .json fallback method
-func (e *RedditExtractor) fetchViaJSON(redditURL string) (*ExtractedResult, error) {
+func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*ExtractedResult, error) {
 	// Add .json to the URL if not already present
 	jsonURL := redditURL
 	if !strings.HasSuffix(redditURL, ".json") {
@@ -633,11 +633,20 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string) (*ExtractedResult, erro
 		},
 	}
 
+	if maxChars != nil {
+		if data, ok := result.Data.(RedditData); ok {
+			if len(data.PostBody) > *maxChars {
+				data.PostBody = data.PostBody[:*maxChars]
+				result.Data = data
+			}
+		}
+	}
+
 	return result, nil
 }
 
 // Extract attempts to fetch Reddit data using API first, then falls back to JSON method
-func (e *RedditExtractor) Extract(redditURL string) (*ExtractedResult, error) {
+func (e *RedditExtractor) Extract(redditURL string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("RedditExtractor: Starting extraction for URL: %s", redditURL)
 
 	result := &ExtractedResult{
@@ -659,7 +668,7 @@ func (e *RedditExtractor) Extract(redditURL string) (*ExtractedResult, error) {
 	switch urlInfo.Type {
 	case RedditPostURL, RedditCommentURL:
 		// Handle individual posts (comments are treated as posts with additional context)
-		return e.extractPost(redditURL, urlInfo)
+		return e.extractPost(redditURL, urlInfo, maxChars)
 
 	case RedditSubredditURL:
 		// Handle subreddit feeds
@@ -685,7 +694,7 @@ func (e *RedditExtractor) Extract(redditURL string) (*ExtractedResult, error) {
 }
 
 // extractPost handles individual Reddit posts
-func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo) (*ExtractedResult, error) {
+func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, maxChars *int) (*ExtractedResult, error) {
 	result := &ExtractedResult{
 		URL:        redditURL,
 		SourceType: "reddit",
@@ -697,6 +706,14 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo) 
 		apiResult, err := e.fetchViaAPI(urlInfo.Subreddit, urlInfo.PostID)
 		if err == nil {
 			log.Printf("RedditExtractor: Successfully extracted data via API for %s", redditURL)
+			if maxChars != nil {
+				if data, ok := apiResult.Data.(RedditData); ok {
+					if len(data.PostBody) > *maxChars {
+						data.PostBody = data.PostBody[:*maxChars]
+						apiResult.Data = data
+					}
+				}
+			}
 			return apiResult, nil
 		}
 		logger.LogError("RedditExtractor: API method failed for %s: %v. Falling back to JSON method", redditURL, err)
@@ -706,7 +723,7 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo) 
 
 	// Fallback to JSON method
 	log.Printf("RedditExtractor: Attempting to use JSON method for %s", redditURL)
-	jsonResult, err := e.fetchViaJSON(redditURL)
+	jsonResult, err := e.fetchViaJSON(redditURL, maxChars)
 	if err != nil {
 		result.Error = fmt.Sprintf("both API and JSON methods failed: %v", err)
 		logger.LogError("RedditExtractor: All methods failed for %s: %s", redditURL, result.Error)

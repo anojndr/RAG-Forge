@@ -159,7 +159,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("Processing: %s", url)
 			// For /search, always use the standard, non-headless extractor for performance.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false)
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false, reqPayload.MaxCharPerURL)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
@@ -192,15 +192,6 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Finished all extractions. Aggregated %d results.", len(extractedResults))
 
-	// Apply truncation if max_char_per_url is set, or use default limit
-	maxChars := 50000 // Default limit to prevent huge responses
-	if reqPayload.MaxCharPerURL != nil && *reqPayload.MaxCharPerURL > 0 {
-		maxChars = *reqPayload.MaxCharPerURL
-		log.Printf("Applying user-specified truncation: max_char_per_url = %d", maxChars)
-	} else {
-		log.Printf("Applying default truncation: max_char_per_url = %d", maxChars)
-	}
-	sh.truncateResults(extractedResults, maxChars)
 
 	resp := FinalResponsePayload{}
 	resp.QueryDetails.Query = reqPayload.Query
@@ -215,43 +206,6 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// truncateResults applies character limits to extracted content
-func (sh *SearchHandler) truncateResults(results []extractor.ExtractedResult, maxChars int) {
-	for i := range results {
-		if !results[i].ProcessedSuccessfully || results[i].Data == nil {
-			continue
-		}
-		switch data := results[i].Data.(type) {
-		case extractor.YouTubeData:
-			if len(data.Transcript) > maxChars {
-				data.Transcript = data.Transcript[:maxChars]
-			}
-			results[i].Data = data
-		case extractor.RedditData:
-			if len(data.PostBody) > maxChars {
-				data.PostBody = data.PostBody[:maxChars]
-			}
-			results[i].Data = data
-		case extractor.TwitterData:
-			// Only truncate tweet content if it exceeds the limit
-			if len(data.TweetContent) > maxChars {
-				data.TweetContent = data.TweetContent[:maxChars]
-			}
-			// Don't truncate comments - keep all extracted comments up to 50
-			results[i].Data = data
-		case extractor.PDFData:
-			if len(data.TextContent) > maxChars {
-				data.TextContent = data.TextContent[:maxChars]
-			}
-			results[i].Data = data
-		case extractor.WebpageData:
-			if len(data.TextContent) > maxChars {
-				data.TextContent = data.TextContent[:maxChars]
-			}
-			results[i].Data = data
-		}
-	}
-}
 
 // HandleExtract is the HTTP handler method for the /extract endpoint.
 func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +262,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("Processing: %s", url)
 			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", true)
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", true, reqPayload.MaxCharPerURL)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
@@ -339,15 +293,6 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Finished all extractions. Processed %d results.", len(extractedResults))
 
-	// Apply truncation if max_char_per_url is set, or use default limit
-	maxChars := 50000 // Default limit to prevent huge responses
-	if reqPayload.MaxCharPerURL != nil && *reqPayload.MaxCharPerURL > 0 {
-		maxChars = *reqPayload.MaxCharPerURL
-		log.Printf("Applying user-specified truncation: max_char_per_url = %d", maxChars)
-	} else {
-		log.Printf("Applying default truncation: max_char_per_url = %d", maxChars)
-	}
-	sh.truncateResults(extractedResults, maxChars)
 
 	resp := ExtractResponsePayload{}
 	resp.RequestDetails.URLsRequested = len(reqPayload.URLs)

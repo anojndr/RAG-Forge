@@ -35,7 +35,7 @@ func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool,
 }
 
 // Extract fetches Twitter/X post content and comments
-func (e *TwitterExtractor) Extract(targetURL string) (*ExtractedResult, error) {
+func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("TwitterExtractor: Starting extraction for URL: %s", targetURL)
 
 	result := &ExtractedResult{
@@ -74,6 +74,15 @@ func (e *TwitterExtractor) Extract(targetURL string) (*ExtractedResult, error) {
 
 	result.Data = tweetData
 	result.ProcessedSuccessfully = true
+
+	if maxChars != nil {
+		if data, ok := result.Data.(*TwitterData); ok {
+			if len(data.TweetContent) > *maxChars {
+				data.TweetContent = data.TweetContent[:*maxChars]
+				result.Data = data
+			}
+		}
+	}
 
 	log.Printf("TwitterExtractor: Successfully extracted tweet data for %s", targetURL)
 	return result, nil
