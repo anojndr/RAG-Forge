@@ -22,12 +22,14 @@ import (
 // TwitterExtractor implements the Extractor interface for Twitter/X URLs
 type TwitterExtractor struct {
 	BaseExtractor
+	BrowserPool *browser.Pool
 }
 
 // NewTwitterExtractor creates a new TwitterExtractor
-func NewTwitterExtractor(appConfig *config.AppConfig) *TwitterExtractor {
+func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool) *TwitterExtractor {
 	return &TwitterExtractor{
 		BaseExtractor: BaseExtractor{Config: appConfig},
+		BrowserPool:   browserPool,
 	}
 }
 
@@ -154,13 +156,14 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	default:
 	}
 
-	// Launch browser with optimizations
-	launcherURL := browser.NewLauncher().MustLaunch()
+	// Get browser from pool
+	browser := e.BrowserPool.Get()
+	defer e.BrowserPool.Return(browser)
 
-	browser := rod.New().ControlURL(launcherURL).MustConnect()
-	defer browser.MustClose()
-
-	page := browser.MustPage()
+	page, err := browser.Page(proto.TargetCreateTarget{URL: ""})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create page: %w", err)
+	}
 	defer page.MustClose()
 
 	// Set user agent using the correct Rod API

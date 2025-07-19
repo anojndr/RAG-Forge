@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 )
@@ -15,6 +16,7 @@ import (
 // Dispatcher is responsible for identifying the type of URL and calling the appropriate extractor.
 type Dispatcher struct {
 	Config             *config.AppConfig
+	BrowserPool        *browser.Pool
 	youtubeExtractor   Extractor
 	redditExtractor    Extractor
 	twitterExtractor   Extractor
@@ -24,7 +26,7 @@ type Dispatcher struct {
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
-func NewDispatcher(appConfig *config.AppConfig) *Dispatcher {
+func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool) *Dispatcher {
 	ytExtractor, err := NewYouTubeExtractor(appConfig)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
@@ -33,13 +35,14 @@ func NewDispatcher(appConfig *config.AppConfig) *Dispatcher {
 	}
 
 	rdExtractor := NewRedditExtractor(appConfig)
-	twExtractor := NewTwitterExtractor(appConfig)
+	twExtractor := NewTwitterExtractor(appConfig, browserPool)
 	pdfExtractor := NewPDFExtractor(appConfig)
 	wpExtractor := NewWebpageExtractor(appConfig)
-	jsWpExtractor := NewJSWebpageExtractor(appConfig)
+	jsWpExtractor := NewJSWebpageExtractor(appConfig, browserPool)
 
 	return &Dispatcher{
 		Config:             appConfig,
+		BrowserPool:        browserPool,
 		youtubeExtractor:   ytExtractor, // This can be nil if NewYouTubeExtractor failed
 		redditExtractor:    rdExtractor,
 		twitterExtractor:   twExtractor,

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"web-search-api-for-llms/internal/api"
+	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/utils"
@@ -43,8 +44,15 @@ func main() {
 		log.Printf("System dependencies validated successfully (Python: %s)", utils.GetPythonCommand())
 	}
 
+	// Initialize browser pool
+	browserPool, err := browser.NewPool(5) // Create a pool of 5 browsers
+	if err != nil {
+		log.Fatalf("Failed to create browser pool: %v", err)
+	}
+	defer browserPool.Cleanup()
+
 	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig)
+	searchHandler := api.NewSearchHandler(appConfig, browserPool)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()

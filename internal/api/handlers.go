@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
@@ -56,11 +57,11 @@ type SearchHandler struct {
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig) *SearchHandler {
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool) *SearchHandler {
 	return &SearchHandler{
 		Config:        appConfig,
 		SearxNGClient: searxng.NewClient(appConfig),
-		Dispatcher:    extractor.NewDispatcher(appConfig),
+		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool),
 	}
 }
 

@@ -18,12 +18,14 @@ import (
 // JSWebpageExtractor implements the Extractor interface for general web pages that require JavaScript rendering.
 type JSWebpageExtractor struct {
 	BaseExtractor // Embed BaseExtractor for config access
+	BrowserPool   *browser.Pool
 }
 
 // NewJSWebpageExtractor creates a new JSWebpageExtractor.
-func NewJSWebpageExtractor(appConfig *config.AppConfig) *JSWebpageExtractor {
+func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Pool) *JSWebpageExtractor {
 	return &JSWebpageExtractor{
 		BaseExtractor: BaseExtractor{Config: appConfig},
+		BrowserPool:   browserPool,
 	}
 }
 
@@ -38,13 +40,14 @@ func (e *JSWebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Launch browser with optimizations
-	launcherURL := browser.NewLauncher().MustLaunch()
+	// Get browser from pool
+	browser := e.BrowserPool.Get()
+	defer e.BrowserPool.Return(browser)
 
-	browser := rod.New().ControlURL(launcherURL).MustConnect()
-	defer browser.MustClose()
-
-	page := browser.MustPage()
+	page, err := browser.Page(proto.TargetCreateTarget{URL: ""})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create page: %w", err)
+	}
 	defer page.MustClose()
 
 	// Set user agent
@@ -54,7 +57,6 @@ func (e *JSWebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 	})
 
 	var title, textContent string
-	var err error
 
 	err = rod.Try(func() {
 		page.Context(ctx).MustNavigate(url)
