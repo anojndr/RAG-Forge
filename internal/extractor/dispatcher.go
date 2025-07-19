@@ -12,12 +12,14 @@ import (
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
+	"web-search-api-for-llms/internal/utils"
 )
 
 // Dispatcher is responsible for identifying the type of URL and calling the appropriate extractor.
 type Dispatcher struct {
 	Config             *config.AppConfig
 	BrowserPool        *browser.Pool
+	PythonPool         *utils.PythonPool
 	mainHTTPClient     *http.Client
 	youtubeExtractor   Extractor
 	redditExtractor    Extractor
@@ -28,8 +30,8 @@ type Dispatcher struct {
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
-func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *Dispatcher {
-	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
+func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, pythonPool *utils.PythonPool, client *http.Client) *Dispatcher {
+	ytExtractor, err := NewYouTubeExtractor(appConfig, client, pythonPool)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
 		// Depending on desired behavior, you might want to panic or handle this more gracefully.
@@ -45,6 +47,7 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, clien
 	return &Dispatcher{
 		Config:             appConfig,
 		BrowserPool:        browserPool,
+		PythonPool:         pythonPool,
 		mainHTTPClient:     client,
 		youtubeExtractor:   ytExtractor, // This can be nil if NewYouTubeExtractor failed
 		redditExtractor:    rdExtractor,
@@ -148,7 +151,12 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		// If content type check fails, fall back to the general webpage extractor.
 		log.Printf("Content type check failed for %s: %v. Defaulting to webpage extractor.", targetURL, err)
 	} else {
-		defer resp.Body.Close()
+		defer func() {
+			err := resp.Body.Close()
+			if err != nil {
+				log.Printf("Error closing response body: %v", err)
+			}
+		}()
 	}
 
 	if isPDF {
@@ -240,7 +248,9 @@ func (d *Dispatcher) CheckContentType(targetURL string) (*http.Response, bool, e
 	buffer := make([]byte, 512)
 	bytesRead, err := resp.Body.Read(buffer)
 	if err != nil && err != io.EOF {
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
 		return nil, false, fmt.Errorf("failed to read response body for content sniffing: %w", err)
 	}
 

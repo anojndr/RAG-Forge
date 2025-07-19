@@ -6,12 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 
+	"github.com/dslipak/pdf"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/useragent"
@@ -29,8 +26,7 @@ func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtra
 	}
 }
 
-// Extract downloads a PDF from a URL, saves it temporarily,
-// and uses pdftotext to extract its text content.
+// Extract downloads a PDF from a URL and extracts its text content using a native Go library.
 func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 	log.Printf("PDFExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
@@ -56,8 +52,9 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 		return result, fmt.Errorf("pdf download failed for %s: %w", url, err)
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("PDFExtractor: Warning - failed to close response body: %v", err)
+		err := resp.Body.Close()
+		if err != nil {
+			logger.LogError("PDFExtractor: failed to close response body for %s: %v", url, err)
 		}
 	}()
 
@@ -68,57 +65,40 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 		return result, fmt.Errorf("pdf download failed for %s with status %s", url, resp.Status)
 	}
 
-	// 2. Create temporary file and stream PDF content
-	tempDir := filepath.Join(os.TempDir(), "pdf_extractor_temp")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		errMsg := fmt.Sprintf("failed to create temp directory: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error creating temp directory %s: %v", tempDir, err)
-		return result, fmt.Errorf("temp directory creation failed: %w", err)
-	}
-
-	tempFile, err := os.CreateTemp(tempDir, "downloaded-*.pdf")
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to create temp file: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error creating temp file: %v", err)
-		return result, fmt.Errorf("temp file creation failed: %w", err)
-	}
-
-	tempFilePath := tempFile.Name()
-	defer func() {
-		if err := os.Remove(tempFilePath); err != nil {
-			log.Printf("PDFExtractor: Warning - failed to clean up temp file %s: %v", tempFilePath, err)
-		}
-	}()
-
-	// Stream response body to the file to avoid holding the entire PDF in memory
-	bytesWritten, err := io.Copy(tempFile, resp.Body)
-	if err != nil {
-		if closeErr := tempFile.Close(); closeErr != nil {
-			log.Printf("PDFExtractor: Warning - failed to close temp file during error handling: %v", closeErr)
-		}
-		errMsg := fmt.Sprintf("failed to write PDF to temp file: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error streaming PDF to temp file %s: %v", tempFilePath, err)
-		return result, fmt.Errorf("pdf streaming failed: %w", err)
-	}
-
-	if err := tempFile.Close(); err != nil {
-		errMsg := fmt.Sprintf("failed to close temp file: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error closing temp file %s: %v", tempFilePath, err)
-		return result, fmt.Errorf("temp file close failed: %w", err)
-	}
-
-	log.Printf("PDFExtractor: Successfully downloaded and saved %d bytes to %s", bytesWritten, tempFilePath)
-
-	// 3. Verify file type and extract text concurrently with multiple methods
-	textContent, err := e.extractTextFromFile(tempFilePath, url)
+	// 2. Extract text directly from the response body
+	textContent, err := e.extractTextFromReader(resp.Body, resp.ContentLength)
 	if err != nil {
 		result.Error = err.Error()
+		// Check if it was an HTML response and try to extract from it
+		if strings.Contains(err.Error(), "unsupported file type: html") {
+			log.Printf("PDFExtractor: File appears to be HTML, attempting HTML extraction for %s", url)
+			// We need to re-download the file as the body has been consumed
+			resp, err := e.HTTPClient.Do(req)
+			if err != nil {
+				return result, fmt.Errorf("failed to re-download for HTML extraction: %w", err)
+			}
+			defer func() {
+				err := resp.Body.Close()
+				if err != nil {
+					logger.LogError("PDFExtractor: failed to close response body for %s: %v", url, err)
+				}
+			}()
+			htmlContent, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return result, fmt.Errorf("failed to read HTML body: %w", readErr)
+			}
+			textContent, htmlErr := e.extractFromHTML(string(htmlContent), url)
+			if htmlErr != nil {
+				result.Error = htmlErr.Error()
+				return result, htmlErr
+			}
+			result.Data = PDFData{TextContent: textContent}
+			result.ProcessedSuccessfully = true
+			return result, nil
+		}
 		return result, err
 	}
+
 	log.Printf("PDFExtractor: Successfully extracted %d characters from %s", len(textContent), url)
 
 	result.ProcessedSuccessfully = true
@@ -128,52 +108,51 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 	return result, nil
 }
 
-// extractTextFromFile detects file type and extracts text using appropriate method
-func (e *PDFExtractor) extractTextFromFile(filePath, url string) (string, error) {
-	// First, detect if this is actually a PDF file
-	fileType, err := e.detectFileType(filePath)
+// extractTextFromReader extracts text from a PDF using an io.Reader.
+func (e *PDFExtractor) extractTextFromReader(reader io.Reader, size int64) (string, error) {
+	// The dslipak/pdf library requires an io.ReaderAt, so we need to buffer the whole PDF in memory.
+	// This is a limitation of the library.
+	pdfBytes, err := io.ReadAll(reader)
 	if err != nil {
-		return "", fmt.Errorf("failed to detect file type: %w", err)
+		return "", fmt.Errorf("failed to read PDF body: %w", err)
 	}
 
-	log.Printf("PDFExtractor: Detected file type: %s for %s", fileType, url)
+	// Detect file type from the buffered bytes
+	fileType := e.detectFileType(pdfBytes)
+	log.Printf("PDFExtractor: Detected file type: %s", fileType)
 
-	switch fileType {
-	case "pdf":
-		return e.extractWithPdftotext(filePath, url)
-	case "html":
-		log.Printf("PDFExtractor: File appears to be HTML, attempting HTML extraction for %s", url)
-		return e.extractFromHTML(filePath, url)
-	default:
-		return "", fmt.Errorf("unsupported file type: %s (expected PDF but got %s)", fileType, fileType)
+	if fileType != "pdf" {
+		return "", fmt.Errorf("unsupported file type: %s", fileType)
 	}
+
+	r := bytes.NewReader(pdfBytes)
+	pdfReader, err := pdf.NewReader(r, int64(len(pdfBytes)))
+	if err != nil {
+		return "", fmt.Errorf("failed to create PDF reader: %w", err)
+	}
+
+	var buf bytes.Buffer
+	b, err := pdfReader.GetPlainText()
+	if err != nil {
+		return "", fmt.Errorf("failed to get plain text from PDF: %w", err)
+	}
+
+	_, err = buf.ReadFrom(b)
+	if err != nil {
+		return "", fmt.Errorf("failed to read text from buffer: %w", err)
+	}
+
+	return buf.String(), nil
 }
 
 // detectFileType examines file header to determine actual file type
-func (e *PDFExtractor) detectFileType(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file for type detection: %w", err)
-	}
-	defer func() {
-		if cerr := file.Close(); cerr != nil {
-			log.Printf("PDFExtractor: Warning - failed to close file after type detection: %v", cerr)
-		}
-	}()
-
-	// Read first 512 bytes to detect file type
-	header := make([]byte, 512)
-	n, err := file.Read(header)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("failed to read file header: %w", err)
-	}
-
-	headerStr := string(header[:n])
+func (e *PDFExtractor) detectFileType(data []byte) string {
+	headerStr := string(data)
 	headerLower := strings.ToLower(headerStr)
 
 	// Check for PDF signature
 	if strings.HasPrefix(headerStr, "%PDF-") {
-		return "pdf", nil
+		return "pdf"
 	}
 
 	// Check for HTML indicators
@@ -181,141 +160,28 @@ func (e *PDFExtractor) detectFileType(filePath string) (string, error) {
 		strings.Contains(headerLower, "<!doctype html") ||
 		strings.Contains(headerLower, "<head>") ||
 		strings.Contains(headerLower, "<title>") {
-		return "html", nil
+		return "html"
 	}
 
 	// Check for common binary signatures
-	if len(header) >= 4 {
+	if len(data) >= 4 {
 		// Check for other common file types that might be misidentified as PDF
-		if bytes.HasPrefix(header, []byte{0x50, 0x4B, 0x03, 0x04}) { // ZIP
-			return "zip", nil
+		if bytes.HasPrefix(data, []byte{0x50, 0x4B, 0x03, 0x04}) { // ZIP
+			return "zip"
 		}
-		if bytes.HasPrefix(header, []byte{0x89, 0x50, 0x4E, 0x47}) { // PNG
-			return "png", nil
+		if bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47}) { // PNG
+			return "png"
 		}
-		if bytes.HasPrefix(header, []byte{0xFF, 0xD8, 0xFF}) { // JPEG
-			return "jpeg", nil
-		}
-	}
-
-	return "unknown", nil
-}
-
-// extractWithPdftotext uses pdftotext command with concurrent extraction attempts
-func (e *PDFExtractor) extractWithPdftotext(filePath, url string) (string, error) {
-	type extractResult struct {
-		text   string
-		method string
-		err    error
-	}
-
-	resultsChan := make(chan extractResult, 3)
-	var wg sync.WaitGroup
-
-	// Try standard pdftotext first
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("pdftotext", filePath, "-")
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			stderrStr := stderr.String()
-			logger.LogError("PDFExtractor: pdftotext standard error for %s: %s", filePath, stderrStr)
-			resultsChan <- extractResult{method: "standard", err: fmt.Errorf("standard pdftotext failed: %s", stderrStr)}
-			return
-		}
-
-		textContent := out.String()
-		if strings.TrimSpace(textContent) != "" {
-			resultsChan <- extractResult{text: textContent, method: "standard", err: nil}
-			return
-		}
-		resultsChan <- extractResult{method: "standard", err: fmt.Errorf("standard pdftotext returned empty content")}
-	}()
-
-	// Try -raw option concurrently
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("pdftotext", "-raw", filePath, "-")
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			resultsChan <- extractResult{method: "raw", err: fmt.Errorf("raw option failed")}
-			return
-		}
-
-		textContent := out.String()
-		if strings.TrimSpace(textContent) != "" {
-			resultsChan <- extractResult{text: textContent, method: "raw", err: nil}
-			return
-		}
-		resultsChan <- extractResult{method: "raw", err: fmt.Errorf("raw option returned empty content")}
-	}()
-
-	// Try -layout option concurrently
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("pdftotext", "-layout", filePath, "-")
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			resultsChan <- extractResult{method: "layout", err: fmt.Errorf("layout option failed")}
-			return
-		}
-
-		textContent := out.String()
-		if strings.TrimSpace(textContent) != "" {
-			resultsChan <- extractResult{text: textContent, method: "layout", err: nil}
-			return
-		}
-		resultsChan <- extractResult{method: "layout", err: fmt.Errorf("layout option returned empty content")}
-	}()
-
-	// Wait for all goroutines to complete
-	go func() {
-		wg.Wait()
-		close(resultsChan)
-	}()
-
-	// Return the first successful result, preferring standard method
-	var results []extractResult
-	for result := range resultsChan {
-		results = append(results, result)
-		if result.err == nil && result.text != "" {
-			log.Printf("PDFExtractor: Successfully extracted text using %s method for %s", result.method, url)
-			return result.text, nil
+		if bytes.HasPrefix(data, []byte{0xFF, 0xD8, 0xFF}) { // JPEG
+			return "jpeg"
 		}
 	}
 
-	// If all methods failed, return the first error
-	if len(results) > 0 {
-		return "", fmt.Errorf("all PDF extraction methods failed for %s: %v", url, results[0].err)
-	}
-
-	return "", fmt.Errorf("no PDF extraction methods completed for %s", url)
+	return "unknown"
 }
 
 // extractFromHTML extracts text from HTML content when PDF URL returns HTML
-func (e *PDFExtractor) extractFromHTML(filePath, url string) (string, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read HTML file: %w", err)
-	}
-
-	htmlContent := string(content)
-
+func (e *PDFExtractor) extractFromHTML(htmlContent, url string) (string, error) {
 	// Basic HTML text extraction - remove tags and decode entities
 	text := e.stripHTMLTags(htmlContent)
 

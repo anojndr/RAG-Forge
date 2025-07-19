@@ -74,8 +74,17 @@ func main() {
 	// purges expired items every 15 minutes
 	appCache := cache.New(10*time.Minute, 15*time.Minute)
 
+	// Initialize Python helper pool
+	pythonPool, err := utils.NewPythonPool(5, func() (*utils.PythonHelper, error) {
+		return utils.NewPythonHelper("internal/extractor/youtube_helper.py")
+	})
+	if err != nil {
+		log.Fatalf("Failed to create python pool: %v", err)
+	}
+	defer pythonPool.Close()
+
 	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache)
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, pythonPool, httpClient, appCache)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()

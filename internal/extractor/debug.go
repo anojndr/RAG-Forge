@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"web-search-api-for-llms/internal/config"
+	"web-search-api-for-llms/internal/utils"
 )
 
 func DebugExtract() {
@@ -13,11 +14,18 @@ func DebugExtract() {
 	}
 
 	client := &http.Client{}
-	yt, err := NewYouTubeExtractor(appConfig, client)
+	pool, err := utils.NewPythonPool(5, func() (*utils.PythonHelper, error) {
+		return utils.NewPythonHelper("internal/extractor/youtube_helper.py")
+	})
+	if err != nil {
+		log.Fatalf("Failed to create python pool: %v", err)
+	}
+	defer pool.Close()
+
+	yt, err := NewYouTubeExtractor(appConfig, client, pool)
 	if err != nil {
 		log.Fatalf("Failed to create YouTubeExtractor: %v", err)
 	}
-	defer yt.Close()
 
 	result, err := yt.Extract("https://www.youtube.com/watch?v=RgBYohJ7mIk")
 	if err != nil {

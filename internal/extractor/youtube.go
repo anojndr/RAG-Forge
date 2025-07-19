@@ -25,26 +25,21 @@ import (
 type YouTubeExtractor struct {
 	BaseExtractor
 	youtubeService *youtube.Service
-	pythonHelper   *utils.PythonHelper
+	pythonPool     *utils.PythonPool
 }
 
 // NewYouTubeExtractor creates a new YouTubeExtractor.
-func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*YouTubeExtractor, error) {
+func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client, pythonPool *utils.PythonPool) (*YouTubeExtractor, error) {
 	ctx := context.Background()
 	ytService, err := youtube.NewService(ctx, option.WithAPIKey(appConfig.YouTubeAPIKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
 	}
 
-	helper, err := utils.NewPythonHelper("internal/extractor/youtube_helper.py")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create python helper: %w", err)
-	}
-
 	return &YouTubeExtractor{
 		BaseExtractor:  NewBaseExtractor(appConfig, client),
 		youtubeService: ytService,
-		pythonHelper:   helper,
+		pythonPool:     pythonPool,
 	}, nil
 }
 
@@ -167,8 +162,8 @@ func (e *YouTubeExtractor) Extract(videoURL string) (*ExtractedResult, error) {
 
 // Close terminates the python helper process
 func (e *YouTubeExtractor) Close() {
-	if e.pythonHelper != nil {
-		e.pythonHelper.Close()
+	if e.pythonPool != nil {
+		e.pythonPool.Close()
 	}
 }
 
@@ -334,9 +329,16 @@ func isValidYouTubeVideoID(videoID string) bool {
 // extractTranscriptWithYTAPI uses the python youtube-transcript-api package to fetch a transcript.
 // It returns the transcript text or an error if retrieval/parsing fails.
 func (e *YouTubeExtractor) extractTranscriptWithYTAPI(ctx context.Context, videoID string) (string, error) {
+	log.Printf("YouTubeExtractor: Getting python helper from pool for %s", videoID)
+	helper, err := e.pythonPool.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get python helper from pool: %w", err)
+	}
+	defer e.pythonPool.Put(helper)
+
 	log.Printf("YouTubeExtractor: Sending request to python helper for %s", videoID)
 	request := map[string]string{"video_id": videoID}
-	response, err := e.pythonHelper.SendRequest(request)
+	response, err := helper.SendRequest(request)
 	if err != nil {
 		logger.LogError("YouTubeExtractor: Python helper request failed for %s: %v", videoID, err)
 		return "", fmt.Errorf("python helper request failed: %w", err)

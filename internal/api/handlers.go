@@ -13,6 +13,7 @@ import (
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/searxng"
+	"web-search-api-for-llms/internal/utils"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -60,11 +61,11 @@ type SearchHandler struct {
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client, appCache *cache.Cache) *SearchHandler {
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, pythonPool *utils.PythonPool, client *http.Client, appCache *cache.Cache) *SearchHandler {
 	return &SearchHandler{
 		Config:        appConfig,
 		SearxNGClient: searxng.NewClient(appConfig, client),
-		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, client),
+		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, pythonPool, client),
 		Cache:         appCache,
 	}
 }
