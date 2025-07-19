@@ -56,19 +56,38 @@ type RedditCommentsResponse struct {
 	} `json:"data"`
 }
 
+// RedditReplies represents the nested replies in a Reddit comment.
+type RedditReplies struct {
+	Data struct {
+		Children []struct {
+			RedditComment
+		} `json:"children"`
+	} `json:"data"`
+}
+
+// UnmarshalJSON handles the case where "replies" can be an empty string.
+func (r *RedditReplies) UnmarshalJSON(b []byte) error {
+	if string(b) == `""` {
+		return nil
+	}
+
+	// Use an alias to avoid recursion
+	type Alias RedditReplies
+	var a Alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*r = RedditReplies(a)
+	return nil
+}
+
 // RedditComment represents a Reddit comment, which can be a regular comment or a "more" object.
 type RedditComment struct {
-	Kind    string `json:"kind"`
-	Body    string `json:"body"`
-	Author  string `json:"author"`
-	Score   int    `json:"score"`
-	Replies struct {
-		Data struct {
-			Children []struct {
-				RedditComment
-			} `json:"children"`
-		} `json:"data"`
-	} `json:"replies"`
+	Kind    string        `json:"kind"`
+	Body    string        `json:"body"`
+	Author  string        `json:"author"`
+	Score   int           `json:"score"`
+	Replies RedditReplies `json:"replies"`
 }
 
 // OAuth token response
