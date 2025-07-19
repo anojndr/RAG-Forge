@@ -188,8 +188,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 				log.Printf("TwitterExtractor: Failed to save cookies: %v", saveErr)
 			}
 		} else {
-			page.MustWaitLoad()
-			time.Sleep(1 * time.Second)
+			page.MustWaitNavigation()
 
 			currentURL := page.MustInfo().URL
 			if strings.Contains(currentURL, "/home") {
@@ -217,8 +216,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	// Navigate to the tweet
 	log.Printf("TwitterExtractor: Navigating to tweet: %s", tweetURL)
 	page.MustNavigate(tweetURL)
-	page.MustWaitLoad()
-	time.Sleep(2 * time.Second)
+	page.MustWaitRequestIdle()
 
 	// Extract tweet content and comments
 	log.Printf("TwitterExtractor: Extracting tweet content and comments")
@@ -229,8 +227,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 	// Navigate to Twitter login
 	page.MustNavigate("https://x.com/i/flow/login")
-	page.MustWaitLoad()
-	time.Sleep(1 * time.Second)
+	page.MustElement(`input[autocomplete="username"]`).MustWaitVisible()
 
 	// Enter username
 	usernameField := page.MustElement(`input[autocomplete="username"]`)
@@ -254,7 +251,7 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 		return fmt.Errorf("could not find or click Next button")
 	}
 
-	time.Sleep(1 * time.Second)
+	page.MustElement(`input[name="password"]`).MustWaitVisible()
 
 	// Enter password
 	log.Printf("TwitterExtractor: Entering password")
@@ -279,7 +276,7 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 		return fmt.Errorf("could not find or click Log in button")
 	}
 
-	time.Sleep(2 * time.Second)
+	page.MustWaitNavigation()
 
 	// Check if login was successful
 	currentURL := page.MustInfo().URL
@@ -375,8 +372,9 @@ func (e *TwitterExtractor) extractTweetAndComments(page *rod.Page) (*TwitterData
 		}
 
 		// Scroll to load more comments
+		// Scroll to load more comments
 		page.MustEval(`() => { window.scrollBy(0, 2000); }`)
-		time.Sleep(1200 * time.Millisecond) // Back to 1200ms for better content loading
+		page.MustWaitRequestIdle()
 	}
 
 	tweetData.Comments = allComments
