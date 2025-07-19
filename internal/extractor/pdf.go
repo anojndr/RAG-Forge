@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -71,7 +72,7 @@ func (e *PDFExtractor) Extract(url string, maxChars *int) (*ExtractedResult, err
 		errMsg := fmt.Sprintf("PDF file size (%d bytes) exceeds the limit of %d bytes", resp.ContentLength, maxPDFSize)
 		result.Error = errMsg
 		logger.LogError("PDFExtractor: %s for %s", errMsg, url)
-		return result, fmt.Errorf(errMsg)
+		return result, errors.New(errMsg)
 	}
 
 	// 2. Process the response body as a stream

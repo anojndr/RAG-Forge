@@ -9,14 +9,13 @@ import (
 	"sync"
 
 	"web-search-api-for-llms/internal/browser"
+	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/searxng"
 	"web-search-api-for-llms/internal/utils"
 	"time"
-
-	"github.com/patrickmn/go-cache"
 )
 // RequestPayload defines the expected JSON structure for the /search endpoint.
 type RequestPayload struct {
@@ -57,11 +56,11 @@ type SearchHandler struct {
 	Config        *config.AppConfig
 	SearxNGClient *searxng.Client
 	Dispatcher    *extractor.Dispatcher
-	Cache         *cache.Cache
+	Cache         cache.Cache
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, pythonPool *utils.PythonPool, client *http.Client, appCache *cache.Cache) *SearchHandler {
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, pythonPool *utils.PythonPool, client *http.Client, appCache cache.Cache) *SearchHandler {
 	return &SearchHandler{
 		Config:        appConfig,
 		SearxNGClient: searxng.NewClient(appConfig, client),

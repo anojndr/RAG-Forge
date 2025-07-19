@@ -78,3 +78,16 @@ TWITTER_PASSWORD=your_twitter_password
 # Can help avoid rate-limiting on transcript extraction.
 WEBSHARE_PROXY_USERNAME=your_webshare_username_here
 WEBSHARE_PROXY_PASSWORD=your_webshare_password_here
+
+# =============================================================================
+# CACHE CONFIGURATION
+# =============================================================================
+
+# Cache type to use (default: memory)
+# Valid values: memory, redis
+CACHE_TYPE=memory
+
+# Redis configuration (only used if CACHE_TYPE is redis)
+REDIS_URL=localhost:6379
+REDIS_PASSWORD=
+REDIS_DB=0

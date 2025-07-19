@@ -28,6 +28,12 @@ type AppConfig struct {
 	// Twitter/X credentials for content extraction
 	TwitterUsername string
 	TwitterPassword string
+
+	// Cache configuration
+	CacheType      string
+	RedisURL       string
+	RedisPassword  string
+	RedisDB        int
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -56,6 +62,12 @@ func LoadConfig() (*AppConfig, error) {
 		TranscriptOrder:       getEnv("YOUTUBE_TRANSCRIPT_ORDER", "ytapi,tactiq"),
 		TwitterUsername:       os.Getenv("TWITTER_USERNAME"),
 		TwitterPassword:       os.Getenv("TWITTER_PASSWORD"),
+
+		// Cache configuration
+		CacheType:     getEnv("CACHE_TYPE", "memory"),
+		RedisURL:      os.Getenv("REDIS_URL"),
+		RedisPassword: os.Getenv("REDIS_PASSWORD"),
+		RedisDB:       getEnvAsInt("REDIS_DB", 0),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -140,4 +152,13 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// getEnvAsInt gets an environment variable as an integer or returns a default value
+func getEnvAsInt(name string, defaultVal int) int {
+	valueStr := getEnv(name, "")
+	if value, err := strconv.Atoi(valueStr); err == nil {
+		return value
+	}
+	return defaultVal
 }

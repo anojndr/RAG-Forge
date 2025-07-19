@@ -14,12 +14,11 @@ import (
 
 	"web-search-api-for-llms/internal/api"
 	"web-search-api-for-llms/internal/browser"
+	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/utils"
-
-	"github.com/patrickmn/go-cache"
 )
 
 func main() {
@@ -70,9 +69,16 @@ func main() {
 		},
 	}
 
-	// Create a new cache with a default expiration time of 10 minutes, and which
-	// purges expired items every 15 minutes
-	appCache := cache.New(10*time.Minute, 15*time.Minute)
+	// Initialize cache based on configuration
+	var appCache cache.Cache
+	switch appConfig.CacheType {
+	case "redis":
+		log.Println("Using Redis cache")
+		appCache = cache.NewRedisCache(appConfig.RedisURL, appConfig.RedisPassword, appConfig.RedisDB)
+	default:
+		log.Println("Using in-memory cache")
+		appCache = cache.NewMemoryCache(10*time.Minute, 15*time.Minute)
+	}
 
 	// Ensure Python dependencies are installed in venv
 	log.Println("Ensuring Python dependencies are installed in venv...")
