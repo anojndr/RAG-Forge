@@ -32,7 +32,8 @@ type RedditData struct {
 	PostBody  string        `json:"post_body"`
 	Score     int           `json:"score"`
 	Author    string        `json:"author"`
-	Comments  []interface{} `json:"comments"`
+	Comments  []RedditComment `json:"comments,omitempty"`
+	Posts     []RedditPost    `json:"posts,omitempty"`
 }
 
 // PDFData represents extracted data from PDF documents

@@ -56,13 +56,19 @@ type RedditCommentsResponse struct {
 	} `json:"data"`
 }
 
-// RedditComment represents a Reddit comment
+// RedditComment represents a Reddit comment, which can be a regular comment or a "more" object.
 type RedditComment struct {
-	Body    string      `json:"body"`
-	Author  string      `json:"author"`
-	Score   int         `json:"score"`
-	Replies interface{} `json:"replies"`
-	Kind    string      `json:"kind"` // Added to detect "more" objects
+	Kind    string `json:"kind"`
+	Body    string `json:"body"`
+	Author  string `json:"author"`
+	Score   int    `json:"score"`
+	Replies struct {
+		Data struct {
+			Children []struct {
+				RedditComment
+			} `json:"children"`
+		} `json:"data"`
+	} `json:"replies"`
 }
 
 // OAuth token response
@@ -253,7 +259,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	// Process post data and comments concurrently
 	type processResult struct {
 		post     *RedditPost
-		comments []interface{}
+		comments []RedditComment
 		err      error
 	}
 
@@ -276,7 +282,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		var commentsData []interface{}
+		var commentsData []RedditComment
 		if len(apiResponse) > 1 {
 			commentsData = e.extractCommentsFromAPI(apiResponse[1])
 		}
@@ -291,7 +297,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 
 	// Collect results
 	var post *RedditPost
-	var commentsData []interface{}
+	var commentsData []RedditComment
 	for result := range resultsChan {
 		if result.err != nil {
 			return nil, result.err
@@ -324,88 +330,57 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	return result, nil
 }
 
+// flattenReplies recursively extracts and flattens comment replies.
+func (e *RedditExtractor) flattenReplies(children []struct{ RedditComment }) []RedditComment {
+	var comments []RedditComment
+	for _, child := range children {
+		comment := child.RedditComment
+		if comment.Kind == "more" || comment.Body == "" || comment.Body == "[deleted]" || comment.Body == "[removed]" {
+			continue
+		}
+
+		// Get replies before clearing them to avoid deep nesting
+		replies := comment.Replies.Data.Children
+		comment.Replies.Data.Children = nil
+
+		comments = append(comments, comment)
+
+		// Recurse for nested replies
+		if len(replies) > 0 {
+			comments = append(comments, e.flattenReplies(replies)...)
+		}
+	}
+	return comments
+}
+
 // extractCommentsFromAPI recursively extracts comments from Reddit API response
-func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse) []interface{} {
-	var comments []interface{}
+func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse) []RedditComment {
+	var comments []RedditComment
 
 	for _, child := range commentsResp.Data.Children {
-		// Parse the child data as a generic object first to check its kind
-		var rawData map[string]interface{}
-		if err := json.Unmarshal(child.Data, &rawData); err != nil {
-			log.Printf("RedditExtractor: Failed to parse child data: %v", err)
-			continue
-		}
-
-		// Check if this is a "more" object (which represents "load more comments")
-		if kind, exists := rawData["kind"]; exists && kind == "more" {
-			log.Printf("RedditExtractor: Skipping 'more' object for pagination")
-			continue
-		}
-
-		// Also check for the presence of "count" and "children" fields which indicate a "more" object
-		if count, hasCount := rawData["count"]; hasCount {
-			if children, hasChildren := rawData["children"]; hasChildren {
-				log.Printf("RedditExtractor: Skipping 'more' object with count=%v and %d children", count, len(children.([]interface{})))
-				continue
-			}
-		}
-
 		var comment RedditComment
 		if err := json.Unmarshal(child.Data, &comment); err != nil {
 			log.Printf("RedditExtractor: Failed to unmarshal comment: %v", err)
 			continue
 		}
 
-		// Skip empty, deleted, or removed comments
-		if comment.Body == "" || comment.Body == "[deleted]" || comment.Body == "[removed]" {
+		// Skip "more" objects, empty, deleted, or removed comments
+		if comment.Kind == "more" || comment.Body == "" || comment.Body == "[deleted]" || comment.Body == "[removed]" {
 			continue
 		}
 
-		// Skip comments that seem to be "more" indicators based on content
-		if strings.Contains(comment.Body, "more comments") || strings.Contains(comment.Body, "more replies") {
-			log.Printf("RedditExtractor: Skipping comment that appears to be a 'more' indicator")
-			continue
+		// Get replies before clearing them to avoid deep nesting
+		replies := comment.Replies.Data.Children
+		comment.Replies.Data.Children = nil
+
+		comments = append(comments, comment)
+
+		// Recursively extract and flatten replies
+		if len(replies) > 0 {
+			comments = append(comments, e.flattenReplies(replies)...)
 		}
 
-		commentData := map[string]interface{}{
-			"author": comment.Author,
-			"text":   comment.Body,
-			"score":  comment.Score,
-		}
-
-		comments = append(comments, commentData)
-
-		// Process nested replies if they exist
-		if comment.Replies != nil {
-			if repliesMap, ok := comment.Replies.(map[string]interface{}); ok {
-				if repliesData, hasData := repliesMap["data"].(map[string]interface{}); hasData {
-					if children, hasChildren := repliesData["children"].([]interface{}); hasChildren {
-						// Recursively process replies
-						var nestedReplies RedditAPIResponse
-						nestedReplies.Data.Children = make([]struct {
-							Data json.RawMessage `json:"data"`
-						}, len(children))
-
-						for i, child := range children {
-							if childMap, ok := child.(map[string]interface{}); ok {
-								if childData, hasChildData := childMap["data"]; hasChildData {
-									if jsonData, err := json.Marshal(childData); err == nil {
-										nestedReplies.Data.Children[i].Data = json.RawMessage(jsonData)
-									}
-								}
-							}
-						}
-
-						nestedComments := e.extractCommentsFromAPI(nestedReplies)
-						if len(nestedComments) > 0 {
-							commentData["replies"] = nestedComments
-						}
-					}
-				}
-			}
-		}
-
-		// Limit to 50 top-level comments for performance
+		// Limit to 50 comments for performance
 		if len(comments) >= 50 {
 			log.Printf("RedditExtractor: Reached comment limit of 50, stopping extraction")
 			break
@@ -456,23 +431,13 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 	}
 
 	// Extract posts data
-	var posts []interface{}
+	var posts []RedditPost
 	for _, child := range jsonResponse.Data.Children {
 		var post RedditPost
 		if err := json.Unmarshal(child.Data, &post); err != nil {
 			continue
 		}
-
-		postData := map[string]interface{}{
-			"title":     post.Title,
-			"selftext":  post.Selftext,
-			"score":     post.Score,
-			"author":    post.Author,
-			"url":       post.URL,
-			"subreddit": post.Subreddit,
-			"id":        post.ID,
-		}
-		posts = append(posts, postData)
+		posts = append(posts, post)
 	}
 
 	result := &ExtractedResult{
@@ -484,7 +449,7 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 			PostBody:  fmt.Sprintf("Recent posts from r/%s", subreddit),
 			Score:     0,
 			Author:    "subreddit",
-			Comments:  posts,
+			Posts:     posts,
 		},
 	}
 
@@ -531,23 +496,13 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 	}
 
 	// Extract user posts data
-	var posts []interface{}
+	var posts []RedditPost
 	for _, child := range jsonResponse.Data.Children {
 		var post RedditPost
 		if err := json.Unmarshal(child.Data, &post); err != nil {
 			continue
 		}
-
-		postData := map[string]interface{}{
-			"title":     post.Title,
-			"selftext":  post.Selftext,
-			"score":     post.Score,
-			"author":    post.Author,
-			"url":       post.URL,
-			"subreddit": post.Subreddit,
-			"id":        post.ID,
-		}
-		posts = append(posts, postData)
+		posts = append(posts, post)
 	}
 
 	result := &ExtractedResult{
@@ -559,7 +514,7 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 			PostBody:  fmt.Sprintf("Recent posts from u/%s", username),
 			Score:     0,
 			Author:    username,
-			Comments:  posts,
+			Posts:     posts,
 		},
 	}
 
@@ -615,7 +570,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 	}
 
 	// Extract comments data
-	var commentsData []interface{}
+	var commentsData []RedditComment
 	if len(jsonResponse) > 1 {
 		commentsData = e.extractCommentsFromAPI(jsonResponse[1])
 	}
