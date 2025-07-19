@@ -99,7 +99,7 @@ func extractTweetID(tweetURL string) string {
 	hostname := strings.ToLower(parsedURL.Hostname())
 
 	// Check if it's a Twitter/X domain
-	if !isTwitterDomain(hostname) {
+	if !IsTwitterDomain(hostname) {
 		return ""
 	}
 
@@ -128,7 +128,7 @@ func extractTweetID(tweetURL string) string {
 }
 
 // isTwitterDomain checks if the hostname is a valid Twitter/X domain
-func isTwitterDomain(hostname string) bool {
+func IsTwitterDomain(hostname string) bool {
 	validDomains := []string{
 		"twitter.com",
 		"www.twitter.com",

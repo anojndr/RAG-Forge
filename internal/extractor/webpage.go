@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
 
 	"web-search-api-for-llms/internal/config"
@@ -35,31 +36,23 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 	}
 
 	c := colly.NewCollector(
-		// MaxDepth is 1, so we only scrap the given page
 		colly.MaxDepth(1),
-		// Randomized User-Agent to mimic different browsers
 		colly.UserAgent(useragent.RandomDesktop()),
-		// Async for potentially faster scraping, though for single URL it's less critical
-		// colly.Async(true), // Let's keep it synchronous for simplicity within a single extractor call
 	)
 
-	// Set a timeout for the request
-	c.SetRequestTimeout(5 * time.Second)
+	c.SetRequestTimeout(10 * time.Second)
 
 	var pageTitle string
 	var textContentBuilder strings.Builder
 
-	// Extract page title
 	c.OnHTML("title", func(h *colly.HTMLElement) {
 		pageTitle = strings.TrimSpace(h.Text)
 	})
 
-	// Remove script and style elements to avoid extracting their content
-	c.OnHTML("script, style", func(h *colly.HTMLElement) {
+	c.OnHTML("script, style, noscript, iframe, nav, footer, header", func(h *colly.HTMLElement) {
 		h.DOM.Remove()
 	})
 
-	// Extract all visible text from the body
 	c.OnHTML("body", func(h *colly.HTMLElement) {
 		textContentBuilder.WriteString(h.Text)
 	})
@@ -68,7 +61,6 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 		errMsg := fmt.Sprintf("Colly request failed: status_code=%d, error=%v", r.StatusCode, err)
 		result.Error = errMsg
 		logger.LogError("WebpageExtractor: Error scraping %s: %s", url, errMsg)
-		// Note: 'err' here will be passed back by c.Visit, so we just populate result.Error
 	})
 
 	c.OnScraped(func(r *colly.Response) {
@@ -77,18 +69,15 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 
 	err := c.Visit(url)
 	if err != nil {
-		// If result.Error wasn't set by OnError, set it now.
 		if result.Error == "" {
 			result.Error = fmt.Sprintf("failed to visit and scrape webpage: %v", err)
 		}
 		logger.LogError("WebpageExtractor: Visit error for %s: %v", url, err)
-		return result, err // Return the error from c.Visit
+		return result, err
 	}
 
-	// If OnError was triggered, result.Error would be set.
-	// If c.Visit succeeded but OnError also set an error, we prioritize that.
 	if result.Error != "" {
-		return result, fmt.Errorf(result.Error) // Ensure an error is returned if result.Error is populated
+		return result, fmt.Errorf(result.Error)
 	}
 
 	result.ProcessedSuccessfully = true
@@ -97,5 +86,35 @@ func (e *WebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 		Title:       pageTitle,
 	}
 
+	return result, nil
+}
+
+// ExtractFromContent extracts content from a pre-fetched byte slice.
+func (e *WebpageExtractor) ExtractFromContent(url string, content []byte) (*ExtractedResult, error) {
+	log.Printf("WebpageExtractor: Starting extraction from content for URL: %s", url)
+	result := &ExtractedResult{
+		URL:        url,
+		SourceType: "webpage",
+	}
+
+	var pageTitle string
+	var textContentBuilder strings.Builder
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(content)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse content: %w", err)
+	}
+
+	pageTitle = strings.TrimSpace(doc.Find("title").Text())
+	doc.Find("script, style, noscript, iframe, nav, footer, header").Remove()
+	textContentBuilder.WriteString(doc.Find("body").Text())
+
+	result.ProcessedSuccessfully = true
+	result.Data = WebpageData{
+		TextContent: strings.TrimSpace(textContentBuilder.String()),
+		Title:       pageTitle,
+	}
+
+	log.Printf("WebpageExtractor: Finished extracting from content for %s. Title: '%s', Text length: %d", url, pageTitle, textContentBuilder.Len())
 	return result, nil
 }

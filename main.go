@@ -113,7 +113,7 @@ func main() {
 	handler := gzipMiddleware(timeoutMiddleware(mux))
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", appConfig.GetPort()),
+		Addr:         ":8086",
 		Handler:      handler,
 		ReadTimeout:  60 * time.Second,  // Increased from 30s
 		WriteTimeout: 120 * time.Second, // Increased from 30s for Twitter extraction
@@ -122,7 +122,7 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting server on port %d", appConfig.GetPort())
+		log.Printf("Starting server on port 8086")
 		log.Printf("Available endpoints:")
 		log.Printf("  POST /search  - Search and extract content from search results")
 		log.Printf("  POST /extract - Extract content from provided URLs")

@@ -1,14 +1,11 @@
 package extractor
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
@@ -120,7 +117,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	}
 
 	// 3. Check for Twitter/X (only for /extract endpoint)
-	if isTwitterDomain(hostname) {
+	if IsTwitterDomain(hostname) {
 		log.Printf("Identified %s as Twitter/X URL", targetURL)
 
 		// Only process Twitter URLs via /extract endpoint
@@ -146,37 +143,20 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		return result, err
 	}
 
-	// 4. Check for PDF or default to webpage
-	resp, isPDF, err := d.CheckContentType(targetURL)
-	if err != nil {
-		// If content type check fails, fall back to the general webpage extractor.
-		log.Printf("Content type check failed for %s: %v. Defaulting to webpage extractor.", targetURL, err)
-	} else {
-		defer func() {
-			err := resp.Body.Close()
-			if err != nil {
-				log.Printf("Error closing response body: %v", err)
+	// 4. Optimistic PDF extraction, with fallback to webpage
+	if d.pdfExtractor != nil {
+		result, err := d.pdfExtractor.Extract(targetURL)
+		if err != nil {
+			// If it's not a PDF, fall back to the webpage extractor.
+			if err == ErrNotPDF {
+				log.Printf("PDF extraction failed, falling back to webpage extractor for %s", targetURL)
+				return d.webpageExtractor.Extract(targetURL)
 			}
-		}()
+			return result, fmt.Errorf("pdf extraction failed: %w", err)
+		}
+		return result, nil
 	}
 
-	if isPDF {
-		log.Printf("Dispatching to PDF Extractor for %s", targetURL)
-		if d.pdfExtractor != nil {
-			// We need to pass the response with the restored body to the extractor
-			// This requires a change in the Extractor interface or the PDF extractor implementation
-			// For now, we assume the extractor can take a response object.
-			// This will be a placeholder for a future change.
-			// result, err := d.pdfExtractor.ExtractWithResponse(resp)
-			result, err := d.pdfExtractor.Extract(targetURL) // Current implementation
-			if err != nil {
-				return result, fmt.Errorf("pdf extraction failed: %w", err)
-			}
-			return result, nil
-		}
-		result, err := d.unimplementedOrFailedInitExtractor("pdf", targetURL, d.pdfExtractor == nil)
-		return result, err
-	}
 
 	// 5. Default to General Web Page Extractor
 	log.Printf("Identified %s as general webpage URL", targetURL)
@@ -225,80 +205,6 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL st
 	}, fmt.Errorf("%s", errMsg)
 }
 
-// CheckContentType performs a GET request and sniffs the content type.
-// It returns true if the content is a PDF, along with the response.
-// If it's not a PDF, it returns false and the response, so the body can be reused.
-func (d *Dispatcher) CheckContentType(targetURL string) (*http.Response, bool, error) {
-	// Create a request with a timeout context
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to create GET request: %w", err)
-	}
-
-	resp, err := d.mainHTTPClient.Do(req)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to perform GET request: %w", err)
-	}
-
-	// Check Content-Type header first
-	contentType := resp.Header.Get("Content-Type")
-	if strings.Contains(strings.ToLower(contentType), "application/pdf") {
-		log.Printf("Confirmed PDF by Content-Type header: %s", contentType)
-		return resp, true, nil
-	}
-
-	// Sniff the first 512 bytes of the body
-	buffer := make([]byte, 512)
-	bytesRead, err := resp.Body.Read(buffer)
-	if err != nil && err != io.EOF {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing response body: %v", err)
-		}
-		return nil, false, fmt.Errorf("failed to read response body for content sniffing: %w", err)
-	}
-
-	// Restore the body so it can be read again
-	resp.Body = &restorableBody{
-		originalBody: resp.Body,
-		readPrefix:   buffer[:bytesRead],
-	}
-
-	detectedContentType := http.DetectContentType(buffer)
-	if strings.Contains(strings.ToLower(detectedContentType), "application/pdf") {
-		log.Printf("Confirmed PDF by content sniffing: %s", detectedContentType)
-		return resp, true, nil
-	}
-
-	log.Printf("Content-Type not PDF. Header: '%s', Sniffed: '%s'", contentType, detectedContentType)
-	return resp, false, nil
-}
-
-// restorableBody allows the beginning of a response body to be read and then "put back".
-type restorableBody struct {
-	originalBody io.ReadCloser
-	readPrefix   []byte
-	prefixRead   bool
-}
-
-func (rb *restorableBody) Read(p []byte) (n int, err error) {
-	if !rb.prefixRead {
-		n = copy(p, rb.readPrefix)
-		if n < len(rb.readPrefix) {
-			rb.readPrefix = rb.readPrefix[n:]
-		} else {
-			rb.prefixRead = true
-		}
-		return n, nil
-	}
-	return rb.originalBody.Read(p)
-}
-
-func (rb *restorableBody) Close() error {
-	return rb.originalBody.Close()
-}
 
 // isYouTubePlaylist checks if a given URL is a YouTube playlist.
 func isYouTubePlaylist(parsedURL *url.URL) bool {
