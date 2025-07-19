@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -139,41 +140,24 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		return result, err
 	}
 
-	// 4. Check for PDF (by Content-Type or .pdf extension)
-	isPDF := false
-	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
-		isPDF = true
-		log.Printf("Identified %s as potential PDF by extension", targetURL)
-	}
-
-	// Optimize PDF detection: only do HEAD request if we really need to
-	// Skip HEAD request for common non-PDF domains to improve performance
-	if !isPDF && !isLikelyNonPDFDomain(hostname) {
-		// Use a shorter timeout for HEAD requests to avoid delays, but reuse the transport
-		headClient := &http.Client{
-			Timeout:   3 * time.Second,
-			Transport: http.DefaultTransport,
-		}
-		headResp, err := headClient.Head(targetURL)
-		if err == nil {
-			contentType := headResp.Header.Get("Content-Type")
-			if err := headResp.Body.Close(); err != nil {
-				log.Printf("Warning: failed to close HEAD response body: %v", err)
-			}
-			log.Printf("Content-Type for %s: %s", targetURL, contentType)
-			if strings.Contains(strings.ToLower(contentType), "application/pdf") {
-				isPDF = true
-				log.Printf("Confirmed %s as PDF by Content-Type", targetURL)
-			}
-		} else {
-			logger.LogError("Error making HEAD request to %s: %v. Proceeding based on extension or as general webpage.", targetURL, err)
-		}
+	// 4. Check for PDF or default to webpage
+	resp, isPDF, err := d.CheckContentType(targetURL)
+	if err != nil {
+		// If content type check fails, fall back to the general webpage extractor.
+		log.Printf("Content type check failed for %s: %v. Defaulting to webpage extractor.", targetURL, err)
+	} else {
+		defer resp.Body.Close()
 	}
 
 	if isPDF {
-		log.Printf("Identified %s as PDF URL", targetURL)
+		log.Printf("Dispatching to PDF Extractor for %s", targetURL)
 		if d.pdfExtractor != nil {
-			result, err := d.pdfExtractor.Extract(targetURL)
+			// We need to pass the response with the restored body to the extractor
+			// This requires a change in the Extractor interface or the PDF extractor implementation
+			// For now, we assume the extractor can take a response object.
+			// This will be a placeholder for a future change.
+			// result, err := d.pdfExtractor.ExtractWithResponse(resp)
+			result, err := d.pdfExtractor.Extract(targetURL) // Current implementation
 			if err != nil {
 				return result, fmt.Errorf("pdf extraction failed: %w", err)
 			}
@@ -230,31 +214,73 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL st
 	}, fmt.Errorf("%s", errMsg)
 }
 
-// isLikelyNonPDFDomain checks if a domain is unlikely to serve PDFs directly
-func isLikelyNonPDFDomain(hostname string) bool {
-	nonPDFDomains := []string{
-		// YouTube domains
-		"youtube.com", "youtu.be", "youtube-nocookie.com", "music.youtube.com",
-		"gaming.youtube.com", "tv.youtube.com", "m.youtube.com",
-		// Reddit domains
-		"reddit.com", "redd.it",
-		// Social media and other platforms
-		"twitter.com", "x.com", "facebook.com", "instagram.com", "tiktok.com",
-		"github.com", "stackoverflow.com", "medium.com", "linkedin.com",
-		"wikipedia.org", "wikimedia.org", "google.com", "bing.com",
-		"news.ycombinator.com", "hackernews.com", "techcrunch.com",
-		"wired.com", "theverge.com", "arstechnica.com", "engadget.com",
-		"bloomberg.com", "reuters.com", "cnn.com", "bbc.com", "nytimes.com",
-		"wsj.com", "ft.com", "guardian.co.uk", "washingtonpost.com",
+// CheckContentType performs a GET request and sniffs the content type.
+// It returns true if the content is a PDF, along with the response.
+// If it's not a PDF, it returns false and the response, so the body can be reused.
+func (d *Dispatcher) CheckContentType(targetURL string) (*http.Response, bool, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to perform GET request: %w", err)
 	}
 
-	for _, domain := range nonPDFDomains {
-		if strings.Contains(hostname, domain) {
-			return true
-		}
+	// Check Content-Type header first
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(strings.ToLower(contentType), "application/pdf") {
+		log.Printf("Confirmed PDF by Content-Type header: %s", contentType)
+		return resp, true, nil
 	}
-	return false
+
+	// Sniff the first 512 bytes of the body
+	buffer := make([]byte, 512)
+	bytesRead, err := resp.Body.Read(buffer)
+	if err != nil && err != io.EOF {
+		resp.Body.Close()
+		return nil, false, fmt.Errorf("failed to read response body for content sniffing: %w", err)
+	}
+
+	// Restore the body so it can be read again
+	resp.Body = &restorableBody{
+		originalBody: resp.Body,
+		readPrefix:   buffer[:bytesRead],
+	}
+
+	detectedContentType := http.DetectContentType(buffer)
+	if strings.Contains(strings.ToLower(detectedContentType), "application/pdf") {
+		log.Printf("Confirmed PDF by content sniffing: %s", detectedContentType)
+		return resp, true, nil
+	}
+
+	log.Printf("Content-Type not PDF. Header: '%s', Sniffed: '%s'", contentType, detectedContentType)
+	return resp, false, nil
 }
+
+// restorableBody allows the beginning of a response body to be read and then "put back".
+type restorableBody struct {
+	originalBody io.ReadCloser
+	readPrefix   []byte
+	prefixRead   bool
+}
+
+func (rb *restorableBody) Read(p []byte) (n int, err error) {
+	if !rb.prefixRead {
+		n = copy(p, rb.readPrefix)
+		if n < len(rb.readPrefix) {
+			rb.readPrefix = rb.readPrefix[n:]
+		} else {
+			rb.prefixRead = true
+		}
+		return n, nil
+	}
+	return rb.originalBody.Read(p)
+}
+
+func (rb *restorableBody) Close() error {
+	return rb.originalBody.Close()
+}
+
 // isYouTubePlaylist checks if a given URL is a YouTube playlist.
 func isYouTubePlaylist(parsedURL *url.URL) bool {
 	// A URL is a playlist if the path contains "/playlist"
