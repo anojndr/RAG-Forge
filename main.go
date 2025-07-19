@@ -74,6 +74,15 @@ func main() {
 	// purges expired items every 15 minutes
 	appCache := cache.New(10*time.Minute, 15*time.Minute)
 
+	// Ensure Python dependencies are installed in venv
+	log.Println("Ensuring Python dependencies are installed in venv...")
+	if err := utils.InstallPythonPackage("youtube-transcript-api"); err != nil {
+		// Log a warning but don't fail, as it might already be installed
+		logger.LogErrorf("Warning: could not ensure python package is installed: %v", err)
+	} else {
+		log.Println("Python dependencies verified.")
+	}
+
 	// Initialize Python helper pool
 	pythonPool, err := utils.NewPythonPool(5, func() (*utils.PythonHelper, error) {
 		return utils.NewPythonHelper("internal/extractor/youtube_helper.py")

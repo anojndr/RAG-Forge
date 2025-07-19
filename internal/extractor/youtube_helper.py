@@ -6,21 +6,11 @@ import importlib.util
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 from youtube_transcript_api.proxies import WebshareProxyConfig
 
-def install_package(package_name):
-    """Installs a package using pip, trying different methods if necessary."""
-    try:
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package_name])
-    except subprocess.CalledProcessError:
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', '--break-system-packages', package_name])
-
 def main():
     """
     A long-lived process that listens for video ID requests on stdin
     and returns transcript data on stdout.
     """
-    # Ensure youtube_transcript_api is installed
-    install_package("youtube_transcript_api")
-
     # Initialize the API, using a proxy if credentials are provided
     username = os.getenv('WEBSHARE_PROXY_USERNAME')
     password = os.getenv('WEBSHARE_PROXY_PASSWORD')
