@@ -2,7 +2,10 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"time"
+	"web-search-api-for-llms/internal/extractor"
+	"web-search-api-for-llms/internal/logger"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -25,15 +28,33 @@ func NewRedisCache(addr, password string, db int) *RedisCache {
 // Get retrieves a value from the cache.
 func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, bool) {
 	val, err := c.client.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return nil, false
-	} else if err != nil {
+	if err != nil { // Handles redis.Nil and other errors
 		return nil, false
 	}
-	return val, true
+
+	// We need a way to unmarshal back into the correct type.
+	// A simple approach for this app is to assume it's always an ExtractedResult.
+	var result extractor.ExtractedResult
+	if err := json.Unmarshal([]byte(val), &result); err != nil {
+		// This could also be a simple string (for search results). Try that too.
+		var urls []string
+		if err2 := json.Unmarshal([]byte(val), &urls); err2 == nil {
+			return urls, true
+		}
+
+		logger.LogError("RedisCache: Failed to unmarshal value for key %s: %v", key, err)
+		return nil, false
+	}
+	return &result, true
 }
 
 // Set adds a value to the cache.
 func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, duration time.Duration) {
-	c.client.Set(ctx, key, value, duration)
+	// Marshal the value to JSON
+	jsonBytes, err := json.Marshal(value)
+	if err != nil {
+		logger.LogError("RedisCache: Failed to marshal value for key %s: %v", key, err)
+		return
+	}
+	c.client.Set(ctx, key, jsonBytes, duration)
 }

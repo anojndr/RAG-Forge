@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 	"os"
 	"strconv"
 
@@ -34,6 +35,8 @@ type AppConfig struct {
 	RedisURL       string
 	RedisPassword  string
 	RedisDB        int
+	SearchCacheTTL time.Duration
+	ContentCacheTTL time.Duration
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -68,6 +71,8 @@ func LoadConfig() (*AppConfig, error) {
 		RedisURL:      os.Getenv("REDIS_URL"),
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 		RedisDB:       getEnvAsInt("REDIS_DB", 0),
+		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
+		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -161,4 +166,13 @@ func getEnvAsInt(name string, defaultVal int) int {
 		return value
 	}
 	return defaultVal
+}
+
+// getEnvAsDuration gets an environment variable as a time.Duration or returns a default value
+func getEnvAsDuration(key string, fallback time.Duration) time.Duration {
+	valueStr := getEnv(key, "")
+	if value, err := time.ParseDuration(valueStr); err == nil {
+		return value
+	}
+	return fallback
 }

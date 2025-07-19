@@ -15,7 +15,6 @@ import (
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/searxng"
 	"web-search-api-for-llms/internal/utils"
-	"time"
 )
 // RequestPayload defines the expected JSON structure for the /search endpoint.
 type RequestPayload struct {
@@ -131,7 +130,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		sh.Cache.Set(r.Context(), "search:"+reqPayload.Query, urls, 10*time.Minute)
+		sh.Cache.Set(r.Context(), "search:"+reqPayload.Query, urls, sh.Config.SearchCacheTTL)
 	}
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
@@ -182,7 +181,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// ... after extraction, before sending to resultsChan
 				cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, 60*time.Minute)
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
 				resultsChan <- extractedData
 			}
 		}(targetURL)
@@ -292,7 +291,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 					resultsChan <- extractedData
 				}
 			} else {
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, 60*time.Minute)
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
 				resultsChan <- extractedData
 			}
 		}(targetURL)

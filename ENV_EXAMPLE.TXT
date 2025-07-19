@@ -91,3 +91,6 @@ CACHE_TYPE=memory
 REDIS_URL=localhost:6379
 REDIS_PASSWORD=
 REDIS_DB=0
+# Cache expiration settings (e.g., 10m, 1h, 30s)
+SEARCH_CACHE_TTL=10m
+CONTENT_CACHE_TTL=1h
