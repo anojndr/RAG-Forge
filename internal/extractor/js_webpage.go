@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 
+	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 )
@@ -33,44 +35,51 @@ func (e *JSWebpageExtractor) Extract(url string) (*ExtractedResult, error) {
 		SourceType: "webpage_js",
 	}
 
-	// Create a new context
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"),
-	)
-
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
+	// Launch browser with optimizations
+	launcherURL := browser.NewLauncher().MustLaunch()
 
-	// Create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
+	browser := rod.New().ControlURL(launcherURL).MustConnect()
+	defer browser.MustClose()
+
+	page := browser.MustPage()
+	defer page.MustClose()
+
+	// Set user agent
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+	page.MustSetUserAgent(&proto.NetworkSetUserAgentOverride{
+		UserAgent: userAgent,
+	})
 
 	var title, textContent string
+	var err error
 
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(url),
-		chromedp.WaitVisible("body", chromedp.ByQuery),
-		chromedp.Title(&title),
+	err = rod.Try(func() {
+		page.Context(ctx).MustNavigate(url)
+		page.Context(ctx).MustWaitLoad()
+
+		// Get title
+		title = page.Context(ctx).MustInfo().Title
+
 		// Extract text from the body, trying to get only visible text
-		chromedp.Evaluate(`
-			(function() {
+		textContentEval := page.Context(ctx).MustEval(`
+			() => {
 				// Remove script and style tags
 				document.querySelectorAll('script, style, noscript, iframe, svg, footer, header, nav').forEach(el => el.remove());
 				// Get the text content of the body
 				return document.body.innerText;
-			})();
-		`, &textContent),
-	)
+			}
+		`)
+		textContent = textContentEval.Str()
+	})
 
 	if err != nil {
-		errMsg := fmt.Sprintf("chromedp execution failed: %v", err)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		errMsg := fmt.Sprintf("rod execution failed: %v", err)
 		result.Error = errMsg
 		logger.LogError("JSWebpageExtractor: Error extracting %s: %s", url, errMsg)
 		return result, err

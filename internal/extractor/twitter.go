@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 
+	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 )
@@ -155,19 +155,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	}
 
 	// Launch browser with optimizations
-	launcherURL := launcher.New().
-		Headless(true).
-		Set("--disable-blink-features", "AutomationControlled").
-		Set("--no-sandbox").
-		Set("--disable-setuid-sandbox").
-		Set("--disable-gpu").
-		Set("--disable-dev-shm-usage").
-		Set("--disable-extensions").
-		Set("--disable-plugins").
-		Set("--disable-images").
-		Set("--disable-javascript-harmony-shipping").
-		Set("--disable-background-networking").
-		MustLaunch()
+	launcherURL := browser.NewLauncher().MustLaunch()
 
 	browser := rod.New().ControlURL(launcherURL).MustConnect()
 	defer browser.MustClose()
