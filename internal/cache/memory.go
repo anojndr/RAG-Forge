@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -19,11 +20,11 @@ func NewMemoryCache(defaultExpiration, cleanupInterval time.Duration) *MemoryCac
 }
 
 // Get retrieves a value from the cache.
-func (c *MemoryCache) Get(key string) (interface{}, bool) {
+func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, bool) {
 	return c.client.Get(key)
 }
 
 // Set adds a value to the cache.
-func (c *MemoryCache) Set(key string, value interface{}, duration time.Duration) {
+func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, duration time.Duration) {
 	c.client.Set(key, value, duration)
 }

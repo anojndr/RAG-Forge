@@ -23,8 +23,8 @@ func NewRedisCache(addr, password string, db int) *RedisCache {
 }
 
 // Get retrieves a value from the cache.
-func (c *RedisCache) Get(key string) (interface{}, bool) {
-	val, err := c.client.Get(context.Background(), key).Result()
+func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, bool) {
+	val, err := c.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return nil, false
 	} else if err != nil {
@@ -34,6 +34,6 @@ func (c *RedisCache) Get(key string) (interface{}, bool) {
 }
 
 // Set adds a value to the cache.
-func (c *RedisCache) Set(key string, value interface{}, duration time.Duration) {
-	c.client.Set(context.Background(), key, value, duration)
+func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, duration time.Duration) {
+	c.client.Set(ctx, key, value, duration)
 }

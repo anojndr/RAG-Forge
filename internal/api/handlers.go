@@ -110,7 +110,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// At the top of HandleSearch
-	if cachedURLs, found := sh.Cache.Get("search:" + reqPayload.Query); found {
+	if cachedURLs, found := sh.Cache.Get(r.Context(), "search:"+reqPayload.Query); found {
 		log.Printf("Search cache HIT for query: %s", reqPayload.Query)
 		urls = cachedURLs.([]string)
 	} else {
@@ -131,7 +131,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		sh.Cache.Set("search:"+reqPayload.Query, urls, 10*time.Minute)
+		sh.Cache.Set(r.Context(), "search:"+reqPayload.Query, urls, 10*time.Minute)
 	}
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
@@ -159,7 +159,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 			// Inside the worker goroutine, before dispatching
 			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(cacheKey); found {
+			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
 				log.Printf("Content cache HIT for URL: %s", url)
 				resultsChan <- cachedResult.(*extractor.ExtractedResult)
 				return // Skip extraction
@@ -182,7 +182,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// ... after extraction, before sending to resultsChan
 				cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-				sh.Cache.Set(cacheKey, extractedData, 60*time.Minute)
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, 60*time.Minute)
 				resultsChan <- extractedData
 			}
 		}(targetURL)
@@ -271,7 +271,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 			// Check cache before processing
 			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(cacheKey); found {
+			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
 				log.Printf("Content cache HIT for URL: %s", url)
 				resultsChan <- cachedResult.(*extractor.ExtractedResult)
 				return
@@ -292,7 +292,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 					resultsChan <- extractedData
 				}
 			} else {
-				sh.Cache.Set(cacheKey, extractedData, 60*time.Minute)
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, 60*time.Minute)
 				resultsChan <- extractedData
 			}
 		}(targetURL)
