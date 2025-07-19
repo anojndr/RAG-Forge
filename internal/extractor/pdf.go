@@ -65,6 +65,15 @@ func (e *PDFExtractor) Extract(url string, maxChars *int) (*ExtractedResult, err
 		return result, fmt.Errorf("download failed for %s with status %s", url, resp.Status)
 	}
 
+	// Add this check
+	const maxPDFSize = 20 * 1024 * 1024 // 20 MB
+	if resp.ContentLength > maxPDFSize {
+		errMsg := fmt.Sprintf("PDF file size (%d bytes) exceeds the limit of %d bytes", resp.ContentLength, maxPDFSize)
+		result.Error = errMsg
+		logger.LogError("PDFExtractor: %s for %s", errMsg, url)
+		return result, fmt.Errorf(errMsg)
+	}
+
 	// 2. Process the response body as a stream
 	textContent, err := e.extractTextFromPDF(resp.Body, resp.ContentLength)
 	if err != nil {
