@@ -51,6 +51,14 @@ type ExtractResponsePayload struct {
 	Error   string                      `json:"error,omitempty"`
 }
 
+// getContentCacheKey generates a cache key for content based on the URL and character limit.
+func getContentCacheKey(url string, maxChars *int) string {
+	if maxChars == nil {
+		return "content:" + url + ":full"
+	}
+	return fmt.Sprintf("content:%s:%d", url, *maxChars)
+}
+
 // SearchHandler holds dependencies for the search handler and manages HTTP request processing.
 type SearchHandler struct {
 	Config        *config.AppConfig
@@ -150,7 +158,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			// Inside the worker goroutine, before dispatching
-			if cachedResult, found := sh.Cache.Get("content:" + url); found {
+			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
+			if cachedResult, found := sh.Cache.Get(cacheKey); found {
 				log.Printf("Content cache HIT for URL: %s", url)
 				resultsChan <- cachedResult.(*extractor.ExtractedResult)
 				return // Skip extraction
@@ -172,7 +181,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				// ... after extraction, before sending to resultsChan
-				sh.Cache.Set("content:"+url, extractedData, 60*time.Minute)
+				cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
+				sh.Cache.Set(cacheKey, extractedData, 60*time.Minute)
 				resultsChan <- extractedData
 			}
 		}(targetURL)
@@ -259,6 +269,14 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 				}
 			}()
 
+			// Check cache before processing
+			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
+			if cachedResult, found := sh.Cache.Get(cacheKey); found {
+				log.Printf("Content cache HIT for URL: %s", url)
+				resultsChan <- cachedResult.(*extractor.ExtractedResult)
+				return
+			}
+
 			log.Printf("Processing: %s", url)
 			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
 			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", true, reqPayload.MaxCharPerURL)
@@ -274,6 +292,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 					resultsChan <- extractedData
 				}
 			} else {
+				sh.Cache.Set(cacheKey, extractedData, 60*time.Minute)
 				resultsChan <- extractedData
 			}
 		}(targetURL)
