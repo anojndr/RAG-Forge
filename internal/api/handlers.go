@@ -13,8 +13,10 @@ import (
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/searxng"
-)
+	"time"
 
+	"github.com/patrickmn/go-cache"
+)
 // RequestPayload defines the expected JSON structure for the /search endpoint.
 type RequestPayload struct {
 	Query         string `json:"query"`
@@ -54,14 +56,16 @@ type SearchHandler struct {
 	Config        *config.AppConfig
 	SearxNGClient *searxng.Client
 	Dispatcher    *extractor.Dispatcher
+	Cache         *cache.Cache
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *SearchHandler {
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client, appCache *cache.Cache) *SearchHandler {
 	return &SearchHandler{
 		Config:        appConfig,
 		SearxNGClient: searxng.NewClient(appConfig, client),
 		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, client),
+		Cache:         appCache,
 	}
 }
 
@@ -94,20 +98,32 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Handling search request: Query='%s', MaxResults=%d", reqPayload.Query, reqPayload.MaxResults)
 
-	urls, err := sh.SearxNGClient.FetchResults(reqPayload.Query, reqPayload.MaxResults)
-	if err != nil {
-		logger.LogError("Error fetching results from search engine(s): %v", err)
-		resp := FinalResponsePayload{
-			Error: fmt.Sprintf("Failed to fetch results from search engine(s): %v", err),
+	var urls []string
+	var err error
+
+	// At the top of HandleSearch
+	if cachedURLs, found := sh.Cache.Get("search:" + reqPayload.Query); found {
+		log.Printf("Search cache HIT for query: %s", reqPayload.Query)
+		urls = cachedURLs.([]string)
+	} else {
+		log.Printf("Search cache MISS for query: %s", reqPayload.Query)
+		// ... fetch from SearxNG/Serper
+		urls, err = sh.SearxNGClient.FetchResults(reqPayload.Query, reqPayload.MaxResults)
+		if err != nil {
+			logger.LogError("Error fetching results from search engine(s): %v", err)
+			resp := FinalResponsePayload{
+				Error: fmt.Sprintf("Failed to fetch results from search engine(s): %v", err),
+			}
+			resp.QueryDetails.Query = reqPayload.Query
+			resp.QueryDetails.MaxResultsRequested = reqPayload.MaxResults
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				logger.LogError("Error encoding error response: %v", err)
+			}
+			return
 		}
-		resp.QueryDetails.Query = reqPayload.Query
-		resp.QueryDetails.MaxResultsRequested = reqPayload.MaxResults
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.LogError("Error encoding error response: %v", err)
-		}
-		return
+		sh.Cache.Set("search:"+reqPayload.Query, urls, 10*time.Minute)
 	}
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
@@ -133,6 +149,13 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 				}
 			}()
 
+			// Inside the worker goroutine, before dispatching
+			if cachedResult, found := sh.Cache.Get("content:" + url); found {
+				log.Printf("Content cache HIT for URL: %s", url)
+				resultsChan <- cachedResult.(*extractor.ExtractedResult)
+				return // Skip extraction
+			}
+
 			log.Printf("Processing: %s", url)
 			// For /search, always use the standard, non-headless extractor for performance.
 			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false)
@@ -148,6 +171,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 					resultsChan <- extractedData
 				}
 			} else {
+				// ... after extraction, before sending to resultsChan
+				sh.Cache.Set("content:"+url, extractedData, 60*time.Minute)
 				resultsChan <- extractedData
 			}
 		}(targetURL)

@@ -18,6 +18,8 @@ import (
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/utils"
+
+	"github.com/patrickmn/go-cache"
 )
 
 func main() {
@@ -68,8 +70,12 @@ func main() {
 		},
 	}
 
+	// Create a new cache with a default expiration time of 10 minutes, and which
+	// purges expired items every 15 minutes
+	appCache := cache.New(10*time.Minute, 15*time.Minute)
+
 	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient)
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
