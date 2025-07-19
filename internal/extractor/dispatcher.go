@@ -18,6 +18,7 @@ import (
 type Dispatcher struct {
 	Config             *config.AppConfig
 	BrowserPool        *browser.Pool
+	mainHTTPClient     *http.Client
 	youtubeExtractor   Extractor
 	redditExtractor    Extractor
 	twitterExtractor   Extractor
@@ -44,6 +45,7 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, clien
 	return &Dispatcher{
 		Config:             appConfig,
 		BrowserPool:        browserPool,
+		mainHTTPClient:     client,
 		youtubeExtractor:   ytExtractor, // This can be nil if NewYouTubeExtractor failed
 		redditExtractor:    rdExtractor,
 		twitterExtractor:   twExtractor,
@@ -218,10 +220,11 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL st
 // It returns true if the content is a PDF, along with the response.
 // If it's not a PDF, it returns false and the response, so the body can be reused.
 func (d *Dispatcher) CheckContentType(targetURL string) (*http.Response, bool, error) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	headClient := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: d.mainHTTPClient.Transport,
 	}
-	resp, err := client.Get(targetURL)
+	resp, err := headClient.Get(targetURL)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to perform GET request: %w", err)
 	}
