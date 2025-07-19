@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -26,9 +27,9 @@ type TwitterExtractor struct {
 }
 
 // NewTwitterExtractor creates a new TwitterExtractor
-func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool) *TwitterExtractor {
+func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *TwitterExtractor {
 	return &TwitterExtractor{
-		BaseExtractor: BaseExtractor{Config: appConfig},
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 		BrowserPool:   browserPool,
 	}
 }

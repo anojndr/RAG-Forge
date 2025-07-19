@@ -103,12 +103,10 @@ type BaseExtractor struct {
 }
 
 // NewBaseExtractor creates a common base for extractors
-func NewBaseExtractor(cfg *config.AppConfig) BaseExtractor {
+func NewBaseExtractor(cfg *config.AppConfig, client *nethttp.Client) BaseExtractor {
 	return BaseExtractor{
-		Config: cfg,
-		HTTPClient: &nethttp.Client{
-			Timeout: 10 * nethttp.DefaultClient.Timeout, // 10 seconds default timeout
-		},
+		Config:     cfg,
+		HTTPClient: client,
 	}
 }
 

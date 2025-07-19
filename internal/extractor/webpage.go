@@ -3,6 +3,7 @@ package extractor
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -19,9 +20,9 @@ type WebpageExtractor struct {
 }
 
 // NewWebpageExtractor creates a new WebpageExtractor.
-func NewWebpageExtractor(appConfig *config.AppConfig) *WebpageExtractor {
+func NewWebpageExtractor(appConfig *config.AppConfig, client *http.Client) *WebpageExtractor {
 	return &WebpageExtractor{
-		BaseExtractor: BaseExtractor{Config: appConfig},
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 	}
 }
 

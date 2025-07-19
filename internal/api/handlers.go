@@ -57,11 +57,11 @@ type SearchHandler struct {
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool) *SearchHandler {
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *SearchHandler {
 	return &SearchHandler{
 		Config:        appConfig,
-		SearxNGClient: searxng.NewClient(appConfig),
-		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool),
+		SearxNGClient: searxng.NewClient(appConfig, client),
+		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, client),
 	}
 }
 

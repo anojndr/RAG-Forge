@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"log"
+	"net/http"
 	"web-search-api-for-llms/internal/config"
 )
 
@@ -11,7 +12,8 @@ func DebugExtract() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	yt, err := NewYouTubeExtractor(appConfig)
+	client := &http.Client{}
+	yt, err := NewYouTubeExtractor(appConfig, client)
 	if err != nil {
 		log.Fatalf("Failed to create YouTubeExtractor: %v", err)
 	}
@@ -24,9 +26,3 @@ func DebugExtract() {
 	log.Printf("Result: %+v", result)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

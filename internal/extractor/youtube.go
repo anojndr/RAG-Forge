@@ -29,7 +29,7 @@ type YouTubeExtractor struct {
 }
 
 // NewYouTubeExtractor creates a new YouTubeExtractor.
-func NewYouTubeExtractor(appConfig *config.AppConfig) (*YouTubeExtractor, error) {
+func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*YouTubeExtractor, error) {
 	ctx := context.Background()
 	ytService, err := youtube.NewService(ctx, option.WithAPIKey(appConfig.YouTubeAPIKey))
 	if err != nil {
@@ -42,7 +42,7 @@ func NewYouTubeExtractor(appConfig *config.AppConfig) (*YouTubeExtractor, error)
 	}
 
 	return &YouTubeExtractor{
-		BaseExtractor:  BaseExtractor{Config: appConfig},
+		BaseExtractor:  NewBaseExtractor(appConfig, client),
 		youtubeService: ytService,
 		pythonHelper:   helper,
 	}, nil
@@ -416,8 +416,7 @@ func (e *YouTubeExtractor) extractTranscriptWithTactiq(ctx context.Context, vide
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("tactiq http: %w", err)
 	}

@@ -57,8 +57,19 @@ func main() {
 	}
 	defer browserPool.Cleanup()
 
+	// Create a single, optimized HTTP client for all network requests
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second, // Generous timeout for extractors
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+			ForceAttemptHTTP2:   true,
+		},
+	}
+
 	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig, browserPool)
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()

@@ -3,6 +3,7 @@ package extractor
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"log"
 	"strings"
 	"time"
@@ -22,9 +23,9 @@ type JSWebpageExtractor struct {
 }
 
 // NewJSWebpageExtractor creates a new JSWebpageExtractor.
-func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Pool) *JSWebpageExtractor {
+func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *JSWebpageExtractor {
 	return &JSWebpageExtractor{
-		BaseExtractor: BaseExtractor{Config: appConfig},
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 		BrowserPool:   browserPool,
 	}
 }

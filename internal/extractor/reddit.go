@@ -18,16 +18,14 @@ import (
 // RedditExtractor implements the Extractor interface for Reddit URLs.
 type RedditExtractor struct {
 	BaseExtractor
-	httpClient  *http.Client
 	accessToken string
 	tokenExpiry time.Time
 }
 
 // NewRedditExtractor creates a new RedditExtractor.
-func NewRedditExtractor(appConfig *config.AppConfig) *RedditExtractor {
+func NewRedditExtractor(appConfig *config.AppConfig, client *http.Client) *RedditExtractor {
 	return &RedditExtractor{
-		BaseExtractor: BaseExtractor{Config: appConfig},
-		httpClient:    &http.Client{Timeout: 5 * time.Second},
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 	}
 }
 
@@ -103,7 +101,7 @@ func (e *RedditExtractor) getAccessToken() error {
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to get access token: %v", err)
 	}
@@ -229,7 +227,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make API request: %v", err)
 	}
@@ -434,7 +432,7 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make subreddit request: %v", err)
 	}
@@ -509,7 +507,7 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make user request: %v", err)
 	}
@@ -587,7 +585,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string) (*ExtractedResult, erro
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make JSON request: %v", err)
 	}

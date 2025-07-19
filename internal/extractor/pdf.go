@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
@@ -20,15 +19,13 @@ import (
 
 // PDFExtractor implements the Extractor interface for PDF files.
 type PDFExtractor struct {
-	BaseExtractor // Embed BaseExtractor for config access
-	httpClient    *http.Client
+	BaseExtractor // Embed BaseExtractor for config and http client access
 }
 
 // NewPDFExtractor creates a new PDFExtractor.
-func NewPDFExtractor(appConfig *config.AppConfig) *PDFExtractor {
+func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtractor {
 	return &PDFExtractor{
-		BaseExtractor: BaseExtractor{Config: appConfig},
-		httpClient:    &http.Client{Timeout: 30 * time.Second}, // Increased timeout for large PDFs
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 	}
 }
 
@@ -51,7 +48,7 @@ func (e *PDFExtractor) Extract(url string) (*ExtractedResult, error) {
 	}
 	req.Header.Set("User-Agent", useragent.Random())
 
-	resp, err := e.httpClient.Do(req)
+	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to download PDF: %v", err)
 		result.Error = errMsg

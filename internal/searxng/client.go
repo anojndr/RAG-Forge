@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
@@ -55,27 +54,17 @@ type SerperSearchResponse struct {
 	// Add other fields like relatedSearches, peopleAlsoAsk, etc. if needed
 }
 
-// optimizedHTTPClient provides a high-performance HTTP client with connection pooling
-var optimizedHTTPClient = &http.Client{
-	Timeout: 5 * time.Second, // Fast timeout for search APIs
-	Transport: &http.Transport{
-		MaxIdleConns:        100,              // Maximum idle connections across all hosts
-		MaxIdleConnsPerHost: 30,               // Higher limit for search APIs
-		IdleConnTimeout:     90 * time.Second, // How long idle connections stay open
-		DisableCompression:  false,            // Enable compression for faster transfers
-		ForceAttemptHTTP2:   true,             // Use HTTP/2 when possible
-	},
-}
-
 // Client is an API client for search engines.
 type Client struct {
-	config *config.AppConfig
+	config     *config.AppConfig
+	httpClient *http.Client
 }
 
 // NewClient creates a new search client.
-func NewClient(appConfig *config.AppConfig) *Client {
+func NewClient(appConfig *config.AppConfig, client *http.Client) *Client {
 	return &Client{
-		config: appConfig,
+		config:     appConfig,
+		httpClient: client,
 	}
 }
 
@@ -123,7 +112,7 @@ func (c *Client) fetchSerperResults(query string, maxResults int) ([]string, err
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", useragent.Random())
 
-	resp, err := optimizedHTTPClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching results from Serper API: %w", err)
 	}
@@ -208,7 +197,7 @@ func (c *Client) fetchSearxNGResults(query string, maxResults int) ([]SearxNGRes
 			}
 			req.Header.Set("User-Agent", useragent.Random())
 
-			resp, err := optimizedHTTPClient.Do(req)
+			resp, err := c.httpClient.Do(req)
 			if err != nil {
 				logger.LogError("Error fetching from SearxNG page %d: %v.\n", pageNum, err)
 				resultsChan <- pageResult{page: pageNum, err: err}

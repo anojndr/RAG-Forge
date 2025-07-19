@@ -26,19 +26,19 @@ type Dispatcher struct {
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
-func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool) *Dispatcher {
-	ytExtractor, err := NewYouTubeExtractor(appConfig)
+func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *Dispatcher {
+	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
 		// Depending on desired behavior, you might want to panic or handle this more gracefully.
 		// For now, we'll let it proceed with a nil extractor for YouTube.
 	}
 
-	rdExtractor := NewRedditExtractor(appConfig)
-	twExtractor := NewTwitterExtractor(appConfig, browserPool)
-	pdfExtractor := NewPDFExtractor(appConfig)
-	wpExtractor := NewWebpageExtractor(appConfig)
-	jsWpExtractor := NewJSWebpageExtractor(appConfig, browserPool)
+	rdExtractor := NewRedditExtractor(appConfig, client)
+	twExtractor := NewTwitterExtractor(appConfig, browserPool, client)
+	pdfExtractor := NewPDFExtractor(appConfig, client)
+	wpExtractor := NewWebpageExtractor(appConfig, client)
+	jsWpExtractor := NewJSWebpageExtractor(appConfig, browserPool, client)
 
 	return &Dispatcher{
 		Config:             appConfig,
@@ -149,8 +149,11 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	// Optimize PDF detection: only do HEAD request if we really need to
 	// Skip HEAD request for common non-PDF domains to improve performance
 	if !isPDF && !isLikelyNonPDFDomain(hostname) {
-		// Use a shorter timeout for HEAD requests to avoid delays
-		headClient := &http.Client{Timeout: 3 * time.Second}
+		// Use a shorter timeout for HEAD requests to avoid delays, but reuse the transport
+		headClient := &http.Client{
+			Timeout:   3 * time.Second,
+			Transport: http.DefaultTransport,
+		}
 		headResp, err := headClient.Head(targetURL)
 		if err == nil {
 			contentType := headResp.Header.Get("Content-Type")
