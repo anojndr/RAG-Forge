@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -228,11 +229,16 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL st
 // It returns true if the content is a PDF, along with the response.
 // If it's not a PDF, it returns false and the response, so the body can be reused.
 func (d *Dispatcher) CheckContentType(targetURL string) (*http.Response, bool, error) {
-	headClient := &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: d.mainHTTPClient.Transport,
+	// Create a request with a timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create GET request: %w", err)
 	}
-	resp, err := headClient.Get(targetURL)
+
+	resp, err := d.mainHTTPClient.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to perform GET request: %w", err)
 	}
