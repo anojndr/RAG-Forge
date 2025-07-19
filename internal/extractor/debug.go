@@ -1,14 +1,27 @@
 package extractor
 
 import (
-	"context"
 	"log"
+	"web-search-api-for-llms/internal/config"
 )
 
 func DebugExtract() {
-	yt := &YouTubeExtractor{}
-	txt, err := yt.extractTranscript(context.Background(), "RgBYohJ7mIk", "https://www.youtube.com/watch?v=RgBYohJ7mIk")
-	log.Printf("err=%v len=%d text-start=%q", err, len(txt), txt[:min(100, len(txt))])
+	appConfig, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	yt, err := NewYouTubeExtractor(appConfig)
+	if err != nil {
+		log.Fatalf("Failed to create YouTubeExtractor: %v", err)
+	}
+	defer yt.Close()
+
+	result, err := yt.Extract("https://www.youtube.com/watch?v=RgBYohJ7mIk")
+	if err != nil {
+		log.Printf("Error extracting: %v", err)
+	}
+	log.Printf("Result: %+v", result)
 }
 
 func min(a, b int) int {

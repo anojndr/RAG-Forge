@@ -8,9 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +25,7 @@ import (
 type YouTubeExtractor struct {
 	BaseExtractor
 	youtubeService *youtube.Service
+	pythonHelper   *utils.PythonHelper
 }
 
 // NewYouTubeExtractor creates a new YouTubeExtractor.
@@ -37,9 +36,15 @@ func NewYouTubeExtractor(appConfig *config.AppConfig) (*YouTubeExtractor, error)
 		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
 	}
 
+	helper, err := utils.NewPythonHelper("internal/extractor/youtube_helper.py")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create python helper: %w", err)
+	}
+
 	return &YouTubeExtractor{
 		BaseExtractor:  BaseExtractor{Config: appConfig},
 		youtubeService: ytService,
+		pythonHelper:   helper,
 	}, nil
 }
 
@@ -158,6 +163,13 @@ func (e *YouTubeExtractor) Extract(videoURL string) (*ExtractedResult, error) {
 	}
 
 	return result, nil
+}
+
+// Close terminates the python helper process
+func (e *YouTubeExtractor) Close() {
+	if e.pythonHelper != nil {
+		e.pythonHelper.Close()
+	}
 }
 
 // extractVideoID extracts the YouTube video ID from various URL formats using Go's standard library.
@@ -322,111 +334,26 @@ func isValidYouTubeVideoID(videoID string) bool {
 // extractTranscriptWithYTAPI uses the python youtube-transcript-api package to fetch a transcript.
 // It returns the transcript text or an error if retrieval/parsing fails.
 func (e *YouTubeExtractor) extractTranscriptWithYTAPI(ctx context.Context, videoID string) (string, error) {
-	// Build the python script which conditionally enables Webshare proxy support.
-	pythonLines := []string{
-		"import os, sys, json, subprocess, importlib.util",
-		"",
-		"# Ensure youtube_transcript_api is available. Install silently if missing.",
-		"package_name = \"youtube_transcript_api\"",
-		"if importlib.util.find_spec(package_name) is None:",
-		"    # Use cross-platform package installation",
-		"    try:",
-		"        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package_name])",
-		"    except subprocess.CalledProcessError:",
-		"        # Fallback for systems requiring --break-system-packages",
-		"        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', '--break-system-packages', package_name])",
-		"",
-		"from youtube_transcript_api import YouTubeTranscriptApi",
-		"from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable",
-		"",
-		"# Check for Webshare credentials via environment variables",
-		"username = os.getenv('WEBSHARE_PROXY_USERNAME')",
-		"password = os.getenv('WEBSHARE_PROXY_PASSWORD')",
-		"",
-		"try:",
-		"    if username and password:",
-		"        from youtube_transcript_api.proxies import WebshareProxyConfig",
-		"        api = YouTubeTranscriptApi(proxy_config=WebshareProxyConfig(proxy_username=username, proxy_password=password))",
-		"    else:",
-		"        api = YouTubeTranscriptApi()",
-		"    ",
-		"    video_id = sys.argv[1]",
-		"    ",
-		"    # Try to get transcript with multiple language preferences",
-		"    try:",
-		"        transcript = api.get_transcript(video_id, languages=['en', 'en-US', 'en-GB'])",
-		"    except NoTranscriptFound:",
-		"        # If English not available, try to get any available transcript",
-		"        transcript_list = api.list_transcripts(video_id)",
-		"        transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB']).fetch()",
-		"    ",
-		"    print(json.dumps(transcript))",
-		"    ",
-		"except TranscriptsDisabled:",
-		"    print(json.dumps({'error': 'Transcripts are disabled for this video'}))",
-		"except NoTranscriptFound:",
-		"    print(json.dumps({'error': 'No transcript found for this video'}))",
-		"except VideoUnavailable:",
-		"    print(json.dumps({'error': 'Video is unavailable'}))",
-		"except Exception as e:",
-		"    print(json.dumps({'error': f'Failed to extract transcript: {str(e)}'}))",
-	}
-
-	pythonScript := strings.Join(pythonLines, "\n")
-
-	// Ensure venv exists before using it
-	if err := utils.EnsureVenvExists(); err != nil {
-		return "", fmt.Errorf("failed to ensure venv exists: %w", err)
-	}
-
-	// Use venv Python only
-	pythonCmd := "./venv/bin/python"
-	if runtime.GOOS == "windows" {
-		pythonCmd = "./venv/Scripts/python.exe"
-	}
-
-	cmd := exec.CommandContext(ctx, pythonCmd, "-c", pythonScript, videoID)
-
-	// Pass Webshare credentials to the python process via environment variables if configured
-	if e.Config != nil && e.Config.WebshareProxyUsername != "" && e.Config.WebshareProxyPassword != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("WEBSHARE_PROXY_USERNAME=%s", e.Config.WebshareProxyUsername))
-		cmd.Env = append(cmd.Env, fmt.Sprintf("WEBSHARE_PROXY_PASSWORD=%s", e.Config.WebshareProxyPassword))
-	}
-
-	output, err := cmd.CombinedOutput()
+	log.Printf("YouTubeExtractor: Sending request to python helper for %s", videoID)
+	request := map[string]string{"video_id": videoID}
+	response, err := e.pythonHelper.SendRequest(request)
 	if err != nil {
-		return "", fmt.Errorf("youtube_transcript_api command failed: %v; output: %s", err, string(output))
+		logger.LogError("YouTubeExtractor: Python helper request failed for %s: %v", videoID, err)
+		return "", fmt.Errorf("python helper request failed: %w", err)
 	}
 
-	// First check if the response contains an error
-	var errorResp struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(output, &errorResp); err == nil && errorResp.Error != "" {
-		return "", fmt.Errorf("youtube_transcript_api error: %s", errorResp.Error)
+	if err, ok := response["error"]; ok {
+		logger.LogError("YouTubeExtractor: Python helper returned error for %s: %v", videoID, err)
+		return "", fmt.Errorf("python helper error: %v", err)
 	}
 
-	// Try to parse as transcript segments
-	var segments []struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(output, &segments); err != nil {
-		return "", fmt.Errorf("failed to parse transcript json: %w; output: %s", err, string(output))
+	if transcript, ok := response["transcript"].(string); ok {
+		log.Printf("YouTubeExtractor: Successfully got transcript from python helper for %s", videoID)
+		return transcript, nil
 	}
 
-	var builder strings.Builder
-	for _, seg := range segments {
-		if seg.Text != "" {
-			builder.WriteString(seg.Text)
-			builder.WriteString(" ")
-		}
-	}
-
-	transcript := strings.TrimSpace(builder.String())
-	if transcript == "" {
-		return "", fmt.Errorf("empty transcript data")
-	}
-	return transcript, nil
+	logger.LogError("YouTubeExtractor: Invalid response from python helper for %s", videoID)
+	return "", fmt.Errorf("invalid response from python helper")
 }
 
 // extractTranscript attempts to retrieve a transcript using youtube-transcript-api first and

@@ -15,6 +15,7 @@ import (
 	"web-search-api-for-llms/internal/api"
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
+	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/utils"
 )
@@ -22,6 +23,11 @@ import (
 func main() {
 	// Setup logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if len(os.Args) > 1 && os.Args[1] == "debug" {
+		extractor.DebugExtract()
+		return
+	}
 
 	// Load configuration
 	appConfig, err := config.LoadConfig()
