@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -135,60 +136,22 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
 
-	// Extract all URLs concurrently without limits
+	// Use a worker pool to process URLs with a configurable number of workers.
+	jobs := make(chan string, len(urls))
 	resultsChan := make(chan *extractor.ExtractedResult, len(urls))
+
 	var wg sync.WaitGroup
-
-	for _, targetURL := range urls {
+	for w := 0; w < sh.Config.MaxConcurrentExtractions; w++ {
 		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-
-			// Panic recovery to prevent single URL from crashing the whole process
-			defer func() {
-				if r := recover(); r != nil {
-					logger.LogError("Panic recovered while processing URL %s: %v", url, r)
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 fmt.Sprintf("panic during processing: %v", r),
-					}
-				}
-			}()
-
-			// Inside the worker goroutine, before dispatching
-			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
-				log.Printf("Content cache HIT for URL: %s", url)
-				resultsChan <- cachedResult.(*extractor.ExtractedResult)
-				return // Skip extraction
-			}
-
-			log.Printf("Processing: %s", url)
-			// For /search, always use the standard, non-headless extractor for performance.
-			// For /search, always use the standard, non-headless extractor for performance.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", reqPayload.MaxCharPerURL)
-			if dispatchErr != nil {
-				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-				if extractedData == nil {
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 dispatchErr.Error(),
-					}
-				} else {
-					resultsChan <- extractedData
-				}
-			} else {
-				// ... after extraction, before sending to resultsChan
-				cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
-				resultsChan <- extractedData
-			}
-		}(targetURL)
+		go sh.extractionWorker(r.Context(), &wg, jobs, resultsChan, "/search", reqPayload.MaxCharPerURL)
 	}
 
-	// Close results channel when all goroutines complete
+	for _, targetURL := range urls {
+		jobs <- targetURL
+	}
+	close(jobs)
+
+	// Wait for all workers to finish and then close the results channel
 	go func() {
 		wg.Wait()
 		close(resultsChan)
@@ -254,58 +217,22 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Handling extract request for %d URLs with unlimited concurrency", len(reqPayload.URLs))
 
-	// Extract all URLs concurrently without limits
+	// Use a worker pool to process URLs with a configurable number of workers.
+	jobs := make(chan string, len(reqPayload.URLs))
 	resultsChan := make(chan *extractor.ExtractedResult, len(reqPayload.URLs))
+
 	var wg sync.WaitGroup
-
-	for _, targetURL := range reqPayload.URLs {
+	for w := 0; w < sh.Config.MaxConcurrentExtractions; w++ {
 		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-
-			// Panic recovery to prevent single URL from crashing the whole process
-			defer func() {
-				if r := recover(); r != nil {
-					logger.LogError("Panic recovered while processing URL %s: %v", url, r)
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 fmt.Sprintf("panic during processing: %v", r),
-					}
-				}
-			}()
-
-			// Check cache before processing
-			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
-				log.Printf("Content cache HIT for URL: %s", url)
-				resultsChan <- cachedResult.(*extractor.ExtractedResult)
-				return
-			}
-
-			log.Printf("Processing: %s", url)
-			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
-			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", reqPayload.MaxCharPerURL)
-			if dispatchErr != nil {
-				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-				if extractedData == nil {
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 dispatchErr.Error(),
-					}
-				} else {
-					resultsChan <- extractedData
-				}
-			} else {
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
-				resultsChan <- extractedData
-			}
-		}(targetURL)
+		go sh.extractionWorker(r.Context(), &wg, jobs, resultsChan, "/extract", reqPayload.MaxCharPerURL)
 	}
 
-	// Close results channel when all goroutines complete
+	for _, targetURL := range reqPayload.URLs {
+		jobs <- targetURL
+	}
+	close(jobs)
+
+	// Wait for all workers to finish and then close the results channel
 	go func() {
 		wg.Wait()
 		close(resultsChan)
@@ -315,7 +242,7 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	for res := range resultsChan {
 		extractedResults = append(extractedResults, *res)
 	}
-
+	
 	log.Printf("Finished all extractions. Processed %d results.", len(extractedResults))
 
 
@@ -334,6 +261,50 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.LogError("Error encoding extract response: %v", err)
+	}
+}
+
+// extractionWorker is a reusable worker function for processing URLs from a channel.
+func (sh *SearchHandler) extractionWorker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan string, results chan<- *extractor.ExtractedResult, endpoint string, maxChars *int) {
+	defer wg.Done()
+	for url := range jobs {
+		// Panic recovery to prevent a single URL from crashing the entire worker.
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
+				results <- &extractor.ExtractedResult{
+					URL:                   url,
+					ProcessedSuccessfully: false,
+					Error:                 fmt.Sprintf("panic during processing: %v", rec),
+				}
+			}
+		}()
+
+		// Check cache before processing
+		cacheKey := getContentCacheKey(url, maxChars)
+		if cachedResult, found := sh.Cache.Get(ctx, cacheKey); found {
+			log.Printf("Content cache HIT for URL: %s", url)
+			results <- cachedResult.(*extractor.ExtractedResult)
+			continue
+		}
+
+		log.Printf("Processing: %s (endpoint: %s)", url, endpoint)
+		extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, endpoint, maxChars)
+		if dispatchErr != nil {
+			logger.LogError("Error processing URL %s: %v", url, dispatchErr)
+			if extractedData == nil {
+				results <- &extractor.ExtractedResult{
+					URL:                   url,
+					ProcessedSuccessfully: false,
+					Error:                 dispatchErr.Error(),
+				}
+			} else {
+				results <- extractedData
+			}
+		} else {
+			sh.Cache.Set(ctx, cacheKey, extractedData, sh.Config.ContentCacheTTL)
+			results <- extractedData
+		}
 	}
 }
 

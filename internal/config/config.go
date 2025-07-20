@@ -37,6 +37,7 @@ type AppConfig struct {
 	RedisDB        int
 	SearchCacheTTL time.Duration
 	ContentCacheTTL time.Duration
+	MaxConcurrentExtractions int
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -73,6 +74,7 @@ func LoadConfig() (*AppConfig, error) {
 		RedisDB:       getEnvAsInt("REDIS_DB", 0),
 		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
+		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", 10),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -120,6 +122,10 @@ func (c *AppConfig) Validate() error {
 	// Warn about incomplete Webshare proxy credentials
 	if (c.WebshareProxyUsername != "" && c.WebshareProxyPassword == "") || (c.WebshareProxyUsername == "" && c.WebshareProxyPassword != "") {
 		fmt.Println("Warning: Incomplete Webshare proxy credentials - proxy will not be used")
+	}
+
+	if c.MaxConcurrentExtractions <= 0 {
+		return fmt.Errorf("invalid value for MAX_CONCURRENT_EXTRACTIONS: %d (must be greater than 0)", c.MaxConcurrentExtractions)
 	}
 
 	return nil
