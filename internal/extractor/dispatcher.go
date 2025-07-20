@@ -88,8 +88,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		strings.Contains(hostname, "music.youtube.com") ||
 		strings.Contains(hostname, "gaming.youtube.com") ||
 		strings.Contains(hostname, "tv.youtube.com") ||
-		strings.Contains(hostname, "m.youtube.com")) &&
-		!isYouTubePlaylist(parsedURL) {
+		strings.Contains(hostname, "m.youtube.com")) {
 		log.Printf("Identified %s as YouTube URL", targetURL)
 		if d.youtubeExtractor != nil {
 			result, err := d.youtubeExtractor.Extract(targetURL, maxChars)

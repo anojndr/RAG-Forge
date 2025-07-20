@@ -43,22 +43,35 @@ func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client, pytho
 	}, nil
 }
 
-// Extract fetches title, channel, top comments, and transcript for a YouTube video.
+// Extract determines if the URL is a video or playlist and calls the appropriate handler.
 func (e *YouTubeExtractor) Extract(videoURL string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("YouTubeExtractor: Starting extraction for URL: %s", videoURL)
+
+	if playlistID := extractPlaylistID(videoURL); playlistID != "" {
+		return e.extractPlaylist(videoURL, playlistID, maxChars)
+	}
+
+	if videoID := extractVideoID(videoURL); videoID != "" {
+		return e.extractVideo(videoURL, videoID, maxChars)
+	}
+
+	result := &ExtractedResult{
+		URL:                   videoURL,
+		SourceType:            "youtube",
+		ProcessedSuccessfully: false,
+		Error:                 "could not extract video ID or playlist ID from URL",
+	}
+	logger.LogError("YouTubeExtractor: Error for %s: %s", videoURL, result.Error)
+	return result, fmt.Errorf(result.Error)
+}
+
+// extractVideo fetches title, channel, top comments, and transcript for a single YouTube video.
+func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChars *int) (*ExtractedResult, error) {
+	log.Printf("YouTubeExtractor: Extracted Video ID: %s for URL: %s", videoID, videoURL)
 	result := &ExtractedResult{
 		URL:        videoURL,
 		SourceType: "youtube",
 	}
-
-	videoID := extractVideoID(videoURL)
-	if videoID == "" {
-		result.Error = "could not extract video ID from URL"
-		logger.LogError("YouTubeExtractor: Error for %s: %s", videoURL, result.Error)
-		return result, fmt.Errorf(result.Error)
-	}
-
-	log.Printf("YouTubeExtractor: Extracted Video ID: %s for URL: %s", videoID, videoURL)
 
 	var videoTitle, channelName string
 	var commentsData []interface{}
@@ -189,6 +202,66 @@ func (e *YouTubeExtractor) Extract(videoURL string, maxChars *int) (*ExtractedRe
 
 	return result, nil
 }
+
+// extractPlaylist fetches the title, channel, and a list of video titles from a YouTube playlist.
+func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxChars *int) (*ExtractedResult, error) {
+	log.Printf("YouTubeExtractor: Starting playlist extraction for ID: %s", playlistID)
+	result := &ExtractedResult{
+		URL:        playlistURL,
+		SourceType: "youtube_playlist",
+	}
+
+	// 1. Get Playlist Details (Title, Channel)
+	playlistCall := e.youtubeService.Playlists.List([]string{"snippet"}).Id(playlistID)
+	playlistResp, err := playlistCall.Do()
+	if err != nil {
+		result.Error = fmt.Sprintf("youtube api playlist details: %v", err)
+		logger.LogError("YouTubeExtractor: Error fetching playlist details for %s: %v", playlistID, err)
+		return result, err
+	}
+	if len(playlistResp.Items) == 0 {
+		result.Error = "youtube api: no playlist details found"
+		logger.LogError("YouTubeExtractor: No playlist details found for %s", playlistID)
+		return result, fmt.Errorf(result.Error)
+	}
+	playlistTitle := playlistResp.Items[0].Snippet.Title
+	channelName := playlistResp.Items[0].Snippet.ChannelTitle
+	log.Printf("YouTubeExtractor: Fetched Playlist Title: '%s', Channel: '%s'", playlistTitle, channelName)
+
+	// 2. Get Playlist Items (Video IDs and Titles)
+	var videoItems []map[string]string
+	playlistItemsCall := e.youtubeService.PlaylistItems.List([]string{"snippet"}).PlaylistId(playlistID).MaxResults(50) // Get up to 50 items
+	err = playlistItemsCall.Pages(context.Background(), func(resp *youtube.PlaylistItemListResponse) error {
+		for _, item := range resp.Items {
+			videoItems = append(videoItems, map[string]string{
+				"title":    item.Snippet.Title,
+				"video_id": item.Snippet.ResourceId.VideoId,
+			})
+		}
+		return nil
+	})
+
+	if err != nil {
+		result.Error = fmt.Sprintf("youtube api playlist items: %v", err)
+		logger.LogError("YouTubeExtractor: Error fetching playlist items for %s: %v", playlistID, err)
+		return result, err
+	}
+	log.Printf("YouTubeExtractor: Fetched %d video items from playlist %s", len(videoItems), playlistID)
+
+	result.Data = YouTubePlaylistData{
+		Title:       playlistTitle,
+		ChannelName: channelName,
+		Videos:      videoItems,
+	}
+	result.ProcessedSuccessfully = true
+
+	// Truncation for playlists is not as straightforward.
+	// For now, we just return the list of video titles.
+	// A more advanced implementation could truncate the number of videos.
+
+	return result, nil
+}
+
 
 // Close terminates the python helper process
 func (e *YouTubeExtractor) Close() {
@@ -487,3 +560,13 @@ func (e *YouTubeExtractor) extractTranscriptWithTactiq(ctx context.Context, vide
 	return transcript, nil
 }
 
+// extractPlaylistID extracts the YouTube playlist ID from a URL.
+func extractPlaylistID(playlistURL string) string {
+	parsedURL, err := url.Parse(playlistURL)
+	if err != nil {
+		return ""
+	}
+
+	// The playlist ID is in the "list" query parameter.
+	return parsedURL.Query().Get("list")
+}

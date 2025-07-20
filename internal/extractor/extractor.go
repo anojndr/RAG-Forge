@@ -26,6 +26,13 @@ type YouTubeData struct {
 	Transcript  string        `json:"transcript"`
 }
 
+// YouTubePlaylistData represents extracted data from YouTube playlists
+type YouTubePlaylistData struct {
+	Title       string              `json:"title"`
+	ChannelName string              `json:"channel_name"`
+	Videos      []map[string]string `json:"videos"`
+}
+
 // RedditData represents extracted data from Reddit posts
 type RedditData struct {
 	PostTitle string        `json:"post_title"`

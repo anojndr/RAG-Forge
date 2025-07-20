@@ -200,7 +200,7 @@ This object represents the outcome of processing a single URL.
 | Field                   | Type        | Description                                                                                             |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | `url`                   | string      | The URL that was processed.                                                                             |
-| `source_type`           | string      | Detected type: `youtube`, `reddit`, `pdf`, `twitter`, `twitter_profile`, `webpage`, or `webpage_js`.        |
+| `source_type`           | string      | Detected type: `youtube`, `youtube_playlist`, `reddit`, `pdf`, `twitter`, `twitter_profile`, `webpage`, or `webpage_js`. |
 | `processed_successfully`| boolean     | `true` if content was extracted successfully, `false` otherwise.                                        |
 | `data`                  | object      | The extracted content. The structure depends on the `source_type`. See below.                         |
 | `error`                 | string      | An error message if `processed_successfully` is `false`. `null` otherwise.                              |
@@ -209,6 +209,7 @@ This object represents the outcome of processing a single URL.
 -   **`webpage` / `webpage_js`**: `{ "title": "...", "text_content": "..." }`
 -   **`pdf`**: `{ "text_content": "..." }`
 -   **`youtube`**: `{ "title": "...", "channel_name": "...", "transcript": "...", "comments": [...] }`
+-   **`youtube_playlist`**: `{ "title": "...", "channel_name": "...", "videos": [ { "title": "...", "video_id": "..." } ] }`
 -   **`reddit`**: `{ "post_title": "...", "post_body": "...", "score": ..., "author": "...", "comments": [...], "posts": [...] }` (Either `comments` or `posts` will be populated).
 -   **`twitter`**: `{ "tweet_content": "...", "tweet_author": "...", "comments": [...], "total_comments": ... }`
 -   **`twitter_profile`**: `{ "profile_url": "...", "latest_tweets": [ { "url": "...", "data": <TwitterData> }, ... ] }`
