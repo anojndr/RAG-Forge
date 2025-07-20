@@ -653,7 +653,8 @@ func (e *TwitterExtractor) extractTweetURLsFromProfile(ctx context.Context, prof
 	}
 
 	page.MustWaitLoad()
-	time.Sleep(5 * time.Second) // Wait for tweets to load
+	// Wait for the <article> element to be present, which contains tweets.
+	page.MustElement("article").MustWaitVisible()
 
 	articles, err := page.Elements("article")
 	if err != nil {

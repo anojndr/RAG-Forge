@@ -88,7 +88,7 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 	// Scroll to the bottom of the page to trigger lazy loading
 	for i := 0; i < 10; i++ {
 		page.Context(ctx).Eval("window.scrollTo(0, document.body.scrollHeight)")
-		time.Sleep(500 * time.Millisecond)
+		page.MustWaitStable()
 	}
 
 	// Select all text using JavaScript
