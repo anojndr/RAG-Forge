@@ -130,18 +130,19 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		return result, err
 	}
 
-	// 4. Optimistic PDF extraction, with fallback to webpage
-	if d.pdfExtractor != nil {
-		result, err := d.pdfExtractor.Extract(targetURL, maxChars)
-		if err != nil {
-			// If it's not a PDF, fall back to the webpage extractor.
-			if err == ErrNotPDF {
-				log.Printf("PDF extraction failed, falling back to webpage extractor for %s", targetURL)
-				return d.webpageExtractor.Extract(targetURL, maxChars)
+	// 4. Check for PDF URLs
+	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
+		log.Printf("Identified %s as PDF URL", targetURL)
+		if d.pdfExtractor != nil {
+			result, err := d.pdfExtractor.Extract(targetURL, maxChars)
+			if err != nil {
+				// If PDF extraction fails, we don't fall back to webpage because we are confident it's a PDF.
+				return result, fmt.Errorf("pdf extraction failed: %w", err)
 			}
-			return result, fmt.Errorf("pdf extraction failed: %w", err)
+			return result, nil
 		}
-		return result, nil
+		result, err := d.unimplementedOrFailedInitExtractor("pdf", targetURL, d.pdfExtractor == nil)
+		return result, err
 	}
 
 
