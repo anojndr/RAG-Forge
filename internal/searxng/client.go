@@ -2,6 +2,7 @@ package searxng
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,7 +93,7 @@ func NewClient(appConfig *config.AppConfig, client *http.Client) *Client {
 }
 
 // fetchSerperResults fetches search results from the Serper.dev API.
-func (c *Client) fetchSerperResults(query string, maxResults int) ([]string, error) {
+func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResults int) ([]string, error) {
 	if c.config.SerperAPIKey == "" {
 		log.Println("Serper API key is not configured. Skipping Serper search.")
 		return nil, fmt.Errorf("serper API key not configured")
@@ -126,7 +127,7 @@ func (c *Client) fetchSerperResults(query string, maxResults int) ([]string, err
 
 	log.Printf("Fetching Serper API results for query: '%s' from %s with num: %d\n", query, apiURL, numResultsToRequest)
 
-	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return nil, fmt.Errorf("error creating Serper API request: %w", err)
 	}
@@ -171,7 +172,7 @@ func (c *Client) fetchSerperResults(query string, maxResults int) ([]string, err
 }
 
 // fetchSearxNGResults fetches search results from a SearxNG instance with concurrent pagination.
-func (c *Client) fetchSearxNGResults(query string, maxResults int) ([]SearxNGResultItem, error) {
+func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResults int) ([]SearxNGResultItem, error) {
 	resultsPerPage := 10 // Default assumption for SearxNG
 	maxPages := 5        // Maximum pages to fetch concurrently
 
@@ -199,6 +200,14 @@ func (c *Client) fetchSearxNGResults(query string, maxResults int) ([]SearxNGRes
 		go func(pageNum int) {
 			defer wg.Done()
 
+			// Check if the context has been cancelled before making a request.
+			select {
+			case <-ctx.Done():
+				resultsChan <- pageResult{page: pageNum, err: ctx.Err()}
+				return
+			default:
+			}
+
 			apiURL, err := url.Parse(c.config.SearxNGURL + "/search")
 			if err != nil {
 				resultsChan <- pageResult{page: pageNum, err: fmt.Errorf("error parsing SearxNG base URL: %w", err)}
@@ -213,7 +222,7 @@ func (c *Client) fetchSearxNGResults(query string, maxResults int) ([]SearxNGRes
 
 			log.Printf("Fetching page %d from SearxNG: %s\n", pageNum, apiURL.String())
 
-			req, err := http.NewRequest("GET", apiURL.String(), nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", apiURL.String(), nil)
 			if err != nil {
 				resultsChan <- pageResult{page: pageNum, err: fmt.Errorf("error creating SearxNG request: %w", err)}
 				return
@@ -293,7 +302,7 @@ func (c *Client) fetchSearxNGResults(query string, maxResults int) ([]SearxNGRes
 
 // FetchResults fetches search results based on configured main and fallback engines.
 // Results from SearxNG are sorted by score.
-func (c *Client) FetchResults(query string, maxResults int) ([]string, error) {
+func (c *Client) FetchResults(ctx context.Context, query string, maxResults int) ([]string, error) {
 	var urls []string
 	var err error
 
@@ -307,7 +316,7 @@ func (c *Client) FetchResults(query string, maxResults int) ([]string, error) {
 		log.Printf("Attempting search with main engine: %s", mainEngine)
 		switch mainEngine {
 		case "searxng":
-			searxngItems, fetchErr := c.fetchSearxNGResults(query, maxResults)
+			searxngItems, fetchErr := c.fetchSearxNGResults(ctx, query, maxResults)
 			if fetchErr != nil {
 				logger.LogError("Error fetching from main engine (SearxNG): %v", fetchErr)
 				err = fetchErr // Store error for potential fallback
@@ -323,7 +332,7 @@ func (c *Client) FetchResults(query string, maxResults int) ([]string, error) {
 				log.Printf("Main engine (SearxNG) returned 0 results.")
 			}
 		case "serper":
-			serperURLs, fetchErr := c.fetchSerperResults(query, maxResults)
+			serperURLs, fetchErr := c.fetchSerperResults(ctx, query, maxResults)
 			if fetchErr != nil {
 				logger.LogError("Error fetching from main engine (Serper): %v", fetchErr)
 				err = fetchErr // Store error
@@ -350,7 +359,7 @@ func (c *Client) FetchResults(query string, maxResults int) ([]string, error) {
 		var fallbackErr error
 		switch fallbackEngine {
 		case "searxng":
-			searxngItems, fetchErr := c.fetchSearxNGResults(query, maxResults)
+			searxngItems, fetchErr := c.fetchSearxNGResults(ctx, query, maxResults)
 			if fetchErr != nil {
 				logger.LogError("Error fetching from fallback engine (SearxNG): %v", fetchErr)
 				fallbackErr = fetchErr
@@ -372,7 +381,7 @@ func (c *Client) FetchResults(query string, maxResults int) ([]string, error) {
 				}
 			}
 		case "serper":
-			serperURLs, fetchErr := c.fetchSerperResults(query, maxResults)
+			serperURLs, fetchErr := c.fetchSerperResults(ctx, query, maxResults)
 			if fetchErr != nil {
 				logger.LogError("Error fetching from fallback engine (Serper): %v", fetchErr)
 				fallbackErr = fetchErr

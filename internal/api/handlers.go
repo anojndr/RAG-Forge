@@ -116,7 +116,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("Search cache MISS for query: %s", reqPayload.Query)
 		// ... fetch from SearxNG/Serper
-		urls, err = sh.SearxNGClient.FetchResults(reqPayload.Query, reqPayload.MaxResults)
+		urls, err = sh.SearxNGClient.FetchResults(r.Context(), reqPayload.Query, reqPayload.MaxResults)
 		if err != nil {
 			logger.LogError("Error fetching results from search engine(s): %v", err)
 			resp := FinalResponsePayload{
