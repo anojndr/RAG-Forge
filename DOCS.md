@@ -1,6 +1,3 @@
-This version provides more detailed explanations of the intelligent extraction features, clarifies the automatic dependency installation, and expands the troubleshooting section.
-
-```markdown
 # RAG-Forge: Complete API Documentation
 
 Welcome to the complete documentation for RAG-Forge, a web content extraction API for RAG pipelines. This guide covers everything from installation and configuration to detailed API usage and development practices.
@@ -27,16 +24,16 @@ Welcome to the complete documentation for RAG-Forge, a web content extraction AP
 
 ## Features
 
--   **Dual Extraction Modes**: Search the web with a query (`/search`) or provide URLs directly (`/extract`).
+-   **Dual Extraction Modes**: Search the web with a query (`/search`) or provide URLs directly (`/extract`). Each endpoint is optimized for its use case (speed vs. compatibility).
 -   **Multi-Source Support**: Automatically extracts content from YouTube, Reddit, Twitter/X, PDFs, and standard webpages.
 -   **Flexible Search Backend**: Use a self-hosted **SearxNG** instance or the commercial **Serper.dev** API. Supports a primary and fallback configuration.
 -   **Intelligent Extraction**:
-    -   **Twitter/X**: Uses browser automation to log in and scrape full post content and comments, bypassing public API limitations. Session cookies are saved to accelerate subsequent requests.
-    -   **YouTube**: Fetches metadata/comments via the official API and uses a robust, configurable transcript extractor (`youtube-transcript-api` or Tactiq fallback) with automatic Python dependency management in a local `venv`.
-    -   **Reddit**: Intelligently parses different Reddit URL types (posts, subreddits, user profiles) and extracts actual comment content, filtering out "load more" placeholders.
--   **Performance Optimized**: Utilizes concurrent processing for multiple URLs and a two-level caching system for both search queries and URL content.
+    -   **Twitter/X**: Uses browser automation to log in and scrape full post content and comments. It can also extract the latest ~5 tweets from a user's profile page. Session cookies are saved to accelerate subsequent requests.
+    -   **YouTube**: Fetches metadata/comments via the official API and uses a robust Python-based transcript extractor (`youtube-transcript-api`) with automated dependency management in a local `venv`.
+    -   **Reddit**: Intelligently parses different Reddit URL types (posts, subreddits, user profiles) and extracts actual content, filtering out "load more" placeholders.
+-   **Automatic Dependency Management**: On startup, the application validates system dependencies (`python`, `pip`, `pdftotext`) and automatically creates a Python virtual environment (`venv`) to install necessary packages.
+-   **Performance Optimized**: Utilizes concurrent processing for multiple URLs and a two-level caching system (in-memory or Redis) for both search queries and URL content.
 -   **Structured Output**: Returns clean, structured JSON data, perfect for feeding into LLMs or RAG systems.
--   **Robust Error Handling**: Provides clear error messages within the JSON response without halting the entire process.
 -   **Health Check**: Includes a `/health` endpoint for easy integration with monitoring and orchestration tools.
 
 ## Prerequisites & Installation
@@ -46,15 +43,17 @@ Before you begin, ensure you have the following dependencies installed and avail
 ### 1. System Dependencies
 
 -   **Go**: Version 1.23.1 or higher.
--   **Python**: Version 3.8 or higher, along with `pip`. Required for the YouTube transcript extractor's automatic setup.
+-   **Python**: Version 3.8 or higher, along with `pip`. The application will use these to create its own isolated environment.
 -   **poppler-utils**: Provides `pdftotext` for PDF extraction.
     -   **On Ubuntu/Debian**: `sudo apt-get update && sudo apt-get install -y poppler-utils`
     -   **On macOS (Homebrew)**: `brew install poppler`
--   **Chromium-based Browser**: Required for Twitter/X extraction. The extractor uses browser automation to scrape content.
+-   **Chromium-based Browser**: Required for Twitter/X extraction.
     -   Install Google Chrome, Chromium, or another compatible browser.
 
 ### 2. Python Packages
-The application now manages its own Python dependencies in a local virtual environment (`venv`) folder. **You no longer need to install `youtube-transcript-api` manually.** The API will create the `venv` and install the package on its first run if needed.
+**No manual installation is needed!** The application manages its own Python dependencies in a local virtual environment (`./venv`). On its first run, the API will automatically:
+1.  Create the `venv` folder if it doesn't exist.
+2.  Install all required Python packages (e.g., `youtube-transcript-api`) into it.
 
 ### 3. Application Setup
 
@@ -82,8 +81,8 @@ Configuration is managed via a `.env` file in the project root.
 
 | Variable                  | Description                                                                                               | Default                            | Required?                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
-| `PORT`                    | The port on which the API server will listen.                                                             | `8080`                             | No                                 |
-| `MAIN_SEARCH_ENGINE`      | The primary search engine to use. Can be `searxng` or `serper`.                                           | `searxng`                          | No                                 |
+| `PORT`                    | The port for the API server. *Note: Currently hardcoded to `8086` in `main.go`. This setting is for future use.* | `8080`                             | No                                 |
+| `MAIN_SEARCH_ENGINE`      | The primary search engine. Can be `searxng` or `serper`.                                                    | `searxng`                          | No                                 |
 | `FALLBACK_SEARCH_ENGINE`  | The fallback engine if the primary fails. Can be `searxng`, `serper`, or empty.                           | `serper`                           | No                                 |
 | `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://localhost:18088`           | If using `searxng`                 |
 | `SERPER_API_KEY`          | Your API key from [serper.dev](https://serper.dev/).                                                      | (none)                             | If using `serper`                  |
@@ -92,11 +91,15 @@ Configuration is managed via a `.env` file in the project root.
 | `YOUTUBE_TRANSCRIPT_ORDER`| Comma-separated order of transcript extraction methods. Valid entries: `ytapi`, `tactiq`.                   | `ytapi,tactiq`                     | No                                 |
 | `REDDIT_CLIENT_ID`        | Your Reddit app client ID.                                                                                | (none)                             | For Reddit features                |
 | `REDDIT_CLIENT_SECRET`    | Your Reddit app client secret.                                                                            | (none)                             | For Reddit features                |
-| `REDDIT_USER_AGENT`       | A descriptive user-agent for Reddit API requests.                                                         | (randomized)                       | For Reddit features                |
+| `REDDIT_USER_AGENT`       | A descriptive user-agent for Reddit API requests.                                                         | `WebSearchApiGo/1.0`               | For Reddit features                |
 | `TWITTER_USERNAME`        | Your Twitter/X username or email for logging in.                                                          | (none)                             | For Twitter/X features             |
 | `TWITTER_PASSWORD`        | Your Twitter/X password.                                                                                  | (none)                             | For Twitter/X features             |
 | `WEBSHARE_PROXY_USERNAME` | Webshare proxy username, used by the YouTube `ytapi` extractor.                                           | (none)                             | Optional                           |
 | `WEBSHARE_PROXY_PASSWORD` | Webshare proxy password, used by the YouTube `ytapi` extractor.                                           | (none)                             | Optional                           |
+| `CACHE_TYPE`              | Cache type to use. Valid values: `memory`, `redis`.                                                       | `memory`                           | No                                 |
+| `REDIS_URL`               | Redis connection URL.                                                                                     | `localhost:6379`                   | If using `redis`                   |
+| `SEARCH_CACHE_TTL`        | Cache duration for search results (e.g., `10m`, `1h`).                                                     | `10m`                              | No                                 |
+| `CONTENT_CACHE_TTL`       | Cache duration for extracted content.                                                                     | `1h`                               | No                                 |
 
 ## Running the API
 
@@ -106,15 +109,15 @@ With your dependencies installed and `.env` file configured, start the server wi
 go run main.go
 ```
 
-The server will log its startup status, port, and available endpoints to the console.
+The server will log its startup status, port, and available endpoints to the console. It now runs on port **8086**.
 
 ## API Reference
 
-The API serves JSON and follows standard HTTP conventions. A successful request to `/search` or `/extract` will return a `200 OK` status, even if some individual URLs failed to process. Failures for specific URLs are reported within the `results` array of the JSON response.
+The API serves JSON and follows standard HTTP conventions. A successful request to `/search` or `/extract` will return a `200 OK` status, even if some individual URLs failed to process. Failures are reported within the `results` array of the JSON response.
 
 ### POST /search
 
-Performs a web search using the configured search engine, then extracts content from the top results.
+Performs a web search, then extracts content from the top results. This endpoint is optimized for speed and uses a fast, non-JS-rendering extractor.
 
 -   **Method**: `POST`
 -   **Path**: `/search`
@@ -129,7 +132,7 @@ Performs a web search using the configured search engine, then extracts content 
 
 **Example Request:**
 ```bash
-curl -X POST http://localhost:8080/search \
+curl -X POST http://localhost:8086/search \
 -H "Content-Type: application/json" \
 -d '{
   "query": "What is Retrieval-Augmented Generation?",
@@ -142,22 +145,21 @@ curl -X POST http://localhost:8080/search \
 
 ### POST /extract
 
-Extracts content directly from a list of provided URLs.
+Extracts content directly from a list of provided URLs. This endpoint **always uses a JS-enabled headless browser** to ensure compatibility with modern, dynamic websites.
 
 -   **Method**: `POST`
 -   **Path**: `/extract`
 -   **Request Body**: `application/json`
 
 **Request Payload:**
-| Field                   | Type           | Description                                                                                                                            | Required |
-| ----------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `urls`                  | array of strings | An array of URLs to extract content from. Maximum of 20 URLs per request.                                                              | Yes      |
-| `max_char_per_url`      | integer        | Optional. Truncates the content of each result to this character limit.                                                                    | No       |
-| `use_headless_browser`  | boolean        | Optional. Defaults to `true`. If `false`, disables the headless browser and uses a simpler, faster HTTP-based extractor. | No       |
+| Field                   | Type           | Description                                                                   | Required |
+| ----------------------- | -------------- | ----------------------------------------------------------------------------- | -------- |
+| `urls`                  | array of strings | An array of URLs to extract content from. Maximum of 20 URLs per request.     | Yes      |
+| `max_char_per_url`      | integer        | Optional. Truncates the content of each result to this character limit.         | No       |
 
 **Example Request:**
 ```bash
-curl -X POST http://localhost:8080/extract \
+curl -X POST http://localhost:8086/extract \
 -H "Content-Type: application/json" \
 -d '{
   "urls": [
@@ -179,7 +181,7 @@ A simple endpoint to check if the API server is running.
 
 **Example Request:**
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8086/health
 ```
 
 **Example Response (`200 OK`):**
@@ -193,48 +195,23 @@ curl http://localhost:8080/health
 ### Response Objects
 
 #### `ExtractedResult`
-This object represents the outcome of processing a single URL. It's a common component in both response payloads.
+This object represents the outcome of processing a single URL.
 
 | Field                   | Type        | Description                                                                                             |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | `url`                   | string      | The URL that was processed.                                                                             |
-| `source_type`           | string      | The detected type of content: `youtube`, `reddit`, `pdf`, `twitter`, `webpage`, or `webpage_js`.        |
+| `source_type`           | string      | Detected type: `youtube`, `reddit`, `pdf`, `twitter`, `twitter_profile`, `webpage`, or `webpage_js`.        |
 | `processed_successfully`| boolean     | `true` if content was extracted successfully, `false` otherwise.                                        |
-| `data`                  | object      | The extracted content. The structure of this object depends on the `source_type`. See below.            |
+| `data`                  | object      | The extracted content. The structure depends on the `source_type`. See below.                         |
 | `error`                 | string      | An error message if `processed_successfully` is `false`. `null` otherwise.                              |
 
 **`data` Object Structures by `source_type`:**
 -   **`webpage` / `webpage_js`**: `{ "title": "...", "text_content": "..." }`
 -   **`pdf`**: `{ "text_content": "..." }`
 -   **`youtube`**: `{ "title": "...", "channel_name": "...", "transcript": "...", "comments": [...] }`
--   **`reddit`**: `{ "post_title": "...", "post_body": "...", "score": ..., "author": "...", "comments": [...] }`
+-   **`reddit`**: `{ "post_title": "...", "post_body": "...", "score": ..., "author": "...", "comments": [...], "posts": [...] }` (Either `comments` or `posts` will be populated).
 -   **`twitter`**: `{ "tweet_content": "...", "tweet_author": "...", "comments": [...], "total_comments": ... }`
-
-**Reddit Comments Structure:**
-Each comment in the `comments` array contains:
-```json
-{
-  "author": "username",
-  "score": 123,
-  "text": "actual comment content",
-  "replies": [...] // nested replies (if any)
-}
-```
-The system extracts up to 50 top-level comments with their actual content, filtering out Reddit's pagination objects that would otherwise show as "... and X more comments".
-
-**Twitter Comment Structure:**
-Each comment in the `comments` array for a Twitter result contains:
-```json
-{
-  "author": "Display Name",
-  "username": "username",
-  "content": "The text of the reply.",
-  "timestamp": "e.g., '1h' or 'Dec 25, 2023'",
-  "likes": "123",
-  "replies": "45",
-  "retweets": "67"
-}
-```
+-   **`twitter_profile`**: `{ "profile_url": "...", "latest_tweets": [ { "url": "...", "data": <TwitterData> }, ... ] }`
 
 #### `FinalResponsePayload` (for `/search`)
 ```json
@@ -267,7 +244,7 @@ Each comment in the `comments` array for a Twitter result contains:
 
 ## Live Demo & Example Integration
 
-You can see this API in action by checking out the **Discord AI Chatbot**, which uses RAG-Forge as its primary tool for web content extraction. This provides a real-world example of how to integrate RAG-Forge into an application to power its knowledge-gathering capabilities.
+You can see this API in action by checking out the **Discord AI Chatbot**, which uses RAG-Forge as its primary tool for web content extraction.
 
 *   **Discord AI Chatbot**: [`https://github.com/anojndr/Discord_AI_chatbot`](https://github.com/anojndr/Discord_AI_chatbot)
 
@@ -278,7 +255,7 @@ You can see this API in action by checking out the **Discord AI Chatbot**, which
 import requests
 import json
 
-API_BASE_URL = "http://localhost:8080"
+API_BASE_URL = "http://localhost:8086"
 
 def search_content(query: str, max_results: int = 5):
     """Search and extract content using the /search endpoint."""
@@ -286,21 +263,7 @@ def search_content(query: str, max_results: int = 5):
         response = requests.post(
             f"{API_BASE_URL}/search",
             json={"query": query, "max_results": max_results},
-            timeout=120  # Increased timeout for complex searches
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        print(f"An error occurred: {e}")
-        return None
-
-def extract_from_urls(urls: list):
-    """Extract content directly from a list of URLs."""
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/extract",
-            json={"urls": urls},
-            timeout=120  # Increased timeout for complex extractions
+            timeout=120
         )
         response.raise_for_status()
         return response.json()
@@ -309,7 +272,6 @@ def extract_from_urls(urls: list):
         return None
 
 if __name__ == "__main__":
-    # Example 1: Search for a topic
     search_results = search_content("latest advancements in AI for drug discovery")
     if search_results and search_results.get("results"):
         print(f"Found {len(search_results['results'])} results.")
@@ -318,75 +280,25 @@ if __name__ == "__main__":
                 print(f"✅ Success: {res['url']} ({res['source_type']})")
             else:
                 print(f"❌ Failed: {res['url']} - Error: {res['error']}")
-    
-    # Example 2: Extract from specific URLs
-    url_list = [
-        "https://x.com/ylecun/status/1733222384223129841",
-        "https://www.reddit.com/r/MachineLearning/comments/1chyvj1/d_what_are_the_most_impressive_llm_demos_youve/"
-    ]
-    extracted_data = extract_from_urls(url_list)
-    if extracted_data:
-        print("\nExtraction from specific URLs:")
-        for res in extracted_data["results"]:
-            print(f"Processed: {res['url']}")
-```
-
-### JavaScript Example
-```javascript
-const API_BASE_URL = 'http://localhost:8080';
-
-async function searchContent(query, maxResults = 5) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query, max_results: maxResults }),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching search content:', error);
-    return null;
-  }
-}
-
-// Example usage:
-searchContent('Common Lisp vs. Scheme')
-  .then(data => {
-    if (data && data.results) {
-      console.log('Search Results:', data.results);
-      data.results.forEach(result => {
-        if (result.processed_successfully) {
-          console.log(`Successfully processed ${result.url}`);
-        }
-      });
-    }
-  });
 ```
 
 ## Troubleshooting
 
 -   **"No results found" for `/search`**:
     -   Verify your `MAIN_SEARCH_ENGINE` is configured correctly in `.env`.
-    -   If using SearxNG, ensure the instance at `SEARXNG_URL` is running and accessible from the API server.
-    -   If using Serper, double-check that `SERPER_API_KEY` is correct and has not expired.
+    -   If using SearxNG, ensure the instance at `SEARXNG_URL` is running.
+    -   If using Serper, double-check that `SERPER_API_KEY` is correct.
 -   **Twitter/X extraction fails**:
-    -   Ensure a Chromium-based browser is installed and accessible in the system's environment.
+    -   Ensure a Chromium-based browser is installed.
     -   Make sure your `TWITTER_USERNAME` and `TWITTER_PASSWORD` are correct.
-    -   On the first run, the API will create a browser session and save cookies to `twitter_cookies.json`. Subsequent runs will be faster. If login fails repeatedly, you may need to **delete `twitter_cookies.json`** to force a fresh login.
-    -   Headless browsing can sometimes be blocked or face CAPTCHAs.
--   **YouTube extraction fails or has no transcript**:
-    -   Ensure Python 3.8+ and `pip` are installed. The API will attempt to create a `venv` and install `youtube-transcript-api` automatically. Check the console logs for any Python or `pip` errors.
-    -   Not all videos have transcripts. The API will still attempt to get metadata and comments.
+    -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login.
+-   **YouTube extraction fails**:
+    -   Ensure Python 3.8+ and `pip` are installed. Check the console logs for any Python or `pip` errors during the automatic `venv` setup.
 -   **PDF extraction fails**:
     -   Ensure `pdftotext` (from `poppler-utils`) is installed and in your system's PATH.
 -   **Server fails to start with "address already in use"**:
-    -   Another process is using the `PORT` defined in your `.env` file. Stop the other process or change the port.
+    -   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
 
 ## Development & Testing
 
-Use standard Go commands for development (e.g., `go build`, `go test`, `go run main.go`). The Makefile and related commands have been removed to simplify the toolchain.
+Use standard Go commands for development (`go build`, `go test`, `go run main.go`). The Makefile and related commands have been removed to simplify the toolchain.

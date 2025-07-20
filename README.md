@@ -13,20 +13,21 @@ The service is built with performance in mind, featuring concurrent processing o
 ## Key Features
 
 *   **Dual Extraction Modes**:
-    *   `POST /search`: Searches the web and extracts content from the top results.
-    *   `POST /extract`: Extracts content directly from a list of provided URLs.
+    *   `POST /search`: Searches the web and extracts content from the top results using a fast, non-JS-rendering scraper.
+    *   `POST /extract`: Extracts content directly from a list of provided URLs, using a JS-enabled headless browser for maximum compatibility with modern websites.
 *   **Multi-Source Content Extraction**: Automatically detects and handles different content types:
-    *   **Twitter/X**: Extracts full post content and comments via browser automation, bypassing public API limitations.
+    *   **Twitter/X**: Extracts full post content and comments via browser automation. Also supports extracting the latest tweets from user profile URLs.
     *   **YouTube**: Extracts video title, channel name, top comments, and full transcript.
-    *   **Reddit**: Fetches post title, body, score, author, and actual comment content (filtering out "load more" placeholders).
+    *   **Reddit**: Fetches post title, body, and comments. Also supports extracting recent posts from subreddit and user profile URLs.
     *   **PDFs**: Extracts clean text content from PDF documents.
-    *   **Webpages**: Scrapes and cleans the main textual content and title from articles and blogs.
+    *   **Webpages**: Scrapes and cleans the main textual content from articles, blogs, and dynamic single-page applications.
 *   **Flexible Search Backend**:
     *   Integrates with a self-hosted **SearxNG** instance or the **Serper.dev** Google Search API.
     *   Supports a primary and fallback search engine configuration.
 *   **Performance Optimized**:
     *   **Concurrent Processing**: Extracts from multiple URLs in parallel for high throughput.
-*   **Simplified Dependencies**: Automatically manages required Python packages in a local `venv` virtual environment.
+    *   **Caching**: In-memory and Redis cache support for both search results and extracted content.
+*   **Simplified Dependencies**: Automatically validates system dependencies and manages required Python packages in a local `venv` virtual environment. No manual `pip install` required.
 *   **Monitoring**: Includes a `GET /health` endpoint for simple health checks.
 
 ## Try it Live
@@ -44,8 +45,9 @@ A high-level overview of the main directories and key files:
 *   `internal/`: Contains the core Go application logic.
     *   `api/`: Handles API request routing, payload processing, and caching.
     *   `config/`: Manages application configuration from `.env` files.
-    *   `extractor/`: Implements the content extraction logic for YouTube, Reddit, Twitter, PDFs, and webpages.
+    *   `extractor/`: Implements the content extraction logic for all supported source types.
     *   `searxng/`: Client for interacting with search engines (SearxNG and Serper).
+    *   `utils/`: Manages Python virtual environments and system dependency checks.
 *   [`main.go`](main.go): The entry point for the Go API server.
 *   [`DOCS.md`](DOCS.md): **Comprehensive documentation on setup, configuration, API reference, and usage.**
 *   [`go.mod`](go.mod): Defines the Go module and its dependencies.
@@ -55,7 +57,7 @@ A high-level overview of the main directories and key files:
 To run this project, you need the following installed and available in your system's PATH:
 
 *   **Go**: Version 1.23.1 or higher.
-*   **Python**: Version 3.8 or higher, along with `pip`.
+*   **Python**: Version 3.8 or higher, along with `pip`. (Python packages are installed automatically by the app).
 *   **External Tools**:
     *   **`pdftotext`**: For PDF extraction (from the `poppler-utils` package).
     *   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
@@ -83,7 +85,7 @@ For detailed, command-line installation instructions, please refer to the **[Ins
     ```
 
 4.  **Run the API Server:**
-    The server will automatically create a Python virtual environment and install necessary packages on first run.
+    The server will automatically validate dependencies, create a Python virtual environment (`venv`), and install necessary packages on the first run.
     ```bash
     go run main.go
     ```
@@ -94,7 +96,7 @@ Once running, you can interact with the API via its endpoints.
 
 **Example: Search and extract content**
 ```bash
-curl -X POST http://localhost:8080/search \
+curl -X POST http://localhost:8086/search \
 -H "Content-Type: application/json" \
 -d '{
   "query": "benefits of learning Go",
@@ -104,7 +106,7 @@ curl -X POST http://localhost:8080/search \
 
 **Example: Extract content from a Twitter/X URL**
 ```bash
-curl -X POST http://localhost:8080/extract \
+curl -X POST http://localhost:8086/extract \
 -H "Content-Type: application/json" \
 -d '{
   "urls": [

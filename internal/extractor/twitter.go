@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -86,6 +87,18 @@ type TweetLegacy struct {
 	RetweetCount  int    `json:"retweet_count"`
 }
 
+// TwitterProfileResult holds the formatted result for a profile URL extraction.
+type TwitterProfileResult struct {
+	ProfileURL   string         `json:"profile_url"`
+	LatestTweets []TweetExtract `json:"latest_tweets"`
+}
+
+// TweetExtract holds the URL and the extracted data for a single tweet.
+type TweetExtract struct {
+	URL  string       `json:"url"`
+	Data *TwitterData `json:"data"`
+}
+
 // TwitterExtractor implements the Extractor interface for Twitter/X URLs
 type TwitterExtractor struct {
 	BaseExtractor
@@ -116,7 +129,19 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Extract tweet ID from URL
+	// Check if we have Twitter credentials
+	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
+		result.Error = "Twitter credentials not configured"
+		logger.LogError("TwitterExtractor: Missing Twitter credentials for %s", targetURL)
+		return result, fmt.Errorf(result.Error)
+	}
+
+	if isProfileURL(targetURL) {
+		// Handle profile URL
+		return e.extractFromProfileURL(ctx, targetURL, maxChars)
+	}
+
+	// Handle single tweet URL (existing logic)
 	tweetID := extractTweetID(targetURL)
 	if tweetID == "" {
 		result.Error = "could not extract tweet ID from URL"
@@ -125,13 +150,6 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 	}
 
 	log.Printf("TwitterExtractor: Extracted Tweet ID: %s for URL: %s", tweetID, targetURL)
-
-	// Check if we have Twitter credentials
-	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
-		result.Error = "Twitter credentials not configured"
-		logger.LogError("TwitterExtractor: Missing Twitter credentials for %s", targetURL)
-		return result, fmt.Errorf(result.Error)
-	}
 
 	// Extract tweet data using browser automation with context
 	tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, targetURL)
@@ -147,7 +165,7 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 	if maxChars != nil {
 		if data, ok := result.Data.(*TwitterData); ok {
 			data.TweetContent = truncateText(data.TweetContent, *maxChars)
-			
+
 			// Truncate comments as well
 			remainingChars := *maxChars - len(data.TweetContent)
 			if remainingChars > 0 {
@@ -166,7 +184,7 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 			} else {
 				data.Comments = []TwitterComment{}
 			}
-			
+
 			result.Data = data
 		}
 	}
@@ -221,6 +239,17 @@ func extractTweetID(tweetURL string) string {
 	}
 
 	return ""
+}
+
+// isProfileURL checks if a URL is a Twitter profile URL.
+func isProfileURL(tweetURL string) bool {
+	// A simple heuristic: if it's a valid Twitter domain and doesn't contain "/status/",
+	// it's likely a profile URL.
+	parsedURL, err := url.Parse(tweetURL)
+	if err != nil {
+		return false
+	}
+	return IsTwitterDomain(parsedURL.Hostname()) && !strings.Contains(parsedURL.Path, "/status/")
 }
 
 // isTwitterDomain checks if the hostname is a valid Twitter/X domain
@@ -545,4 +574,105 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 	}
 
 	return true
+}
+
+// extractFromProfileURL handles the extraction of the latest 5 tweets from a profile URL.
+func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL string, maxChars *int) (*ExtractedResult, error) {
+	result := &ExtractedResult{
+		URL:        profileURL,
+		SourceType: "twitter_profile",
+	}
+
+	tweetURLs, err := e.extractTweetURLsFromProfile(ctx, profileURL)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to extract tweet URLs from profile: %v", err)
+		logger.LogError("TwitterExtractor: Error for %s: %s", profileURL, result.Error)
+		return result, err
+	}
+
+	var wg sync.WaitGroup
+	tweetExtracts := make(chan TweetExtract, len(tweetURLs))
+
+	for _, tweetURL := range tweetURLs {
+		wg.Add(1)
+		go func(tURL string) {
+			defer wg.Done()
+			tweetID := extractTweetID(tURL)
+			if tweetID == "" {
+				logger.LogError("TwitterExtractor: Could not extract tweet ID from %s", tURL)
+				return
+			}
+
+			tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, tURL)
+			if err != nil {
+				logger.LogError("TwitterExtractor: Failed to extract data for tweet %s: %v", tURL, err)
+				return
+			}
+			tweetExtracts <- TweetExtract{URL: tURL, Data: tweetData}
+		}(tweetURL)
+	}
+
+	wg.Wait()
+	close(tweetExtracts)
+
+	profileResult := &TwitterProfileResult{
+		ProfileURL:   profileURL,
+		LatestTweets: []TweetExtract{},
+	}
+
+	for extract := range tweetExtracts {
+		profileResult.LatestTweets = append(profileResult.LatestTweets, extract)
+	}
+
+	result.Data = profileResult
+	result.ProcessedSuccessfully = true
+
+	log.Printf("TwitterExtractor: Successfully extracted latest tweets from profile %s", profileURL)
+	return result, nil
+}
+
+// extractTweetURLsFromProfile extracts the latest 5 tweet URLs from a profile page.
+func (e *TwitterExtractor) extractTweetURLsFromProfile(ctx context.Context, profileURL string) ([]string, error) {
+	browser := e.BrowserPool.Get()
+	defer e.BrowserPool.Return(browser)
+
+	page, err := browser.Page(proto.TargetCreateTarget{URL: ""})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create page: %w", err)
+	}
+	defer page.MustClose()
+
+	if err := page.Navigate(profileURL); err != nil {
+		return nil, fmt.Errorf("failed to navigate to profile page: %w", err)
+	}
+
+	page.MustWaitLoad()
+	time.Sleep(5 * time.Second) // Wait for tweets to load
+
+	articles, err := page.Elements("article")
+	if err != nil {
+		return nil, fmt.Errorf("could not find tweet articles: %w", err)
+	}
+
+	var tweetURLs []string
+	for _, article := range articles {
+		if len(tweetURLs) >= 5 {
+			break
+		}
+		link, err := article.Element(`a[href*="/status/"]`)
+		if err != nil {
+			continue
+		}
+		href, err := link.Attribute("href")
+		if err != nil {
+			continue
+		}
+		tweetURLs = append(tweetURLs, "https://x.com"+*href)
+	}
+
+	if len(tweetURLs) == 0 {
+		return nil, fmt.Errorf("no tweet URLs found on profile page")
+	}
+
+	return tweetURLs, nil
 }
