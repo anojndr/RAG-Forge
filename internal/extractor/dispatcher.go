@@ -59,11 +59,11 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, pytho
 // DispatchAndExtract determines the URL type and calls the appropriate extractor.
 func (d *Dispatcher) DispatchAndExtract(targetURL string, maxChars *int) (*ExtractedResult, error) {
 	// Default to not using headless browser if context is not provided.
-	return d.DispatchAndExtractWithContext(targetURL, "", false, maxChars)
+	return d.DispatchAndExtractWithContext(targetURL, "", maxChars)
 }
 
 // DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
-func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, useHeadlessBrowser bool, maxChars *int) (*ExtractedResult, error) {
+func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("Dispatching URL: %s from endpoint: %s", targetURL, endpoint)
 
 	parsedURL, err := url.Parse(targetURL)
@@ -150,7 +150,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	// For the /extract endpoint, use the headless browser if requested.
 	// For all other endpoints (like /search), always use the standard extractor.
-	if endpoint == "/extract" && useHeadlessBrowser {
+	if endpoint == "/extract" {
 		log.Printf("Using JS-enabled (headless) extractor for %s on /extract", targetURL)
 		if d.jsWebpageExtractor != nil {
 			result, err := d.jsWebpageExtractor.Extract(targetURL, maxChars)
@@ -164,7 +164,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	}
 
 	// Fallback to the standard webpage extractor for /search or when headless is not requested.
-	log.Printf("Using standard webpage extractor for %s (endpoint: %s, useHeadless: %v)", targetURL, endpoint, useHeadlessBrowser)
+	log.Printf("Using standard webpage extractor for %s (endpoint: %s)", targetURL, endpoint)
 	if d.webpageExtractor != nil {
 		result, err := d.webpageExtractor.Extract(targetURL, maxChars)
 		if err != nil {

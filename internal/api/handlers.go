@@ -166,7 +166,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("Processing: %s", url)
 			// For /search, always use the standard, non-headless extractor for performance.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", false, reqPayload.MaxCharPerURL)
+			// For /search, always use the standard, non-headless extractor for performance.
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", reqPayload.MaxCharPerURL)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
@@ -284,7 +285,8 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("Processing: %s", url)
 			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", true, reqPayload.MaxCharPerURL)
+			// For /extract, always use the headless browser for better accuracy with JS-heavy sites.
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", reqPayload.MaxCharPerURL)
 			if dispatchErr != nil {
 				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
 				if extractedData == nil {
