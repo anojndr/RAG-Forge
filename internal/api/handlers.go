@@ -322,3 +322,4 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 		logger.LogError("Error encoding extract response: %v", err)
 	}
 }
+

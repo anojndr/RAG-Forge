@@ -20,10 +20,77 @@ import (
 	"web-search-api-for-llms/internal/logger"
 )
 
+// TweetDetailResponse defines the structure for the entire JSON response from the Twitter API.
+type TweetDetailResponse struct {
+	Data struct {
+		ThreadedConversationWithInjectionsV2 struct {
+			Instructions []struct {
+				Type    string  `json:"type"`
+				Entries []Entry `json:"entries"`
+			} `json:"instructions"`
+		} `json:"threaded_conversation_with_injections_v2"`
+	} `json:"data"`
+}
+
+// Entry represents a single entry in the timeline, which could be a tweet, a comment, or a cursor.
+type Entry struct {
+	EntryID string `json:"entryId"`
+	Content struct {
+		EntryType   string `json:"entryType"`
+		Value       string `json:"value"` // For cursors
+		ItemContent struct {
+			ItemType     string `json:"itemType"`
+			TweetResults struct {
+				Result TweetResult `json:"result"`
+			} `json:"tweet_results"`
+		} `json:"itemContent"`
+		Items []struct {
+			Item struct {
+				ItemContent struct {
+					TweetResults struct {
+						Result TweetResult `json:"result"`
+					} `json:"tweet_results"`
+				} `json:"itemContent"`
+			} `json:"item"`
+		} `json:"items"`
+	} `json:"content"`
+}
+
+// TweetResult contains the main data of a tweet.
+type TweetResult struct {
+	Typename string `json:"__typename"`
+	RestID   string `json:"rest_id"`
+	Core     struct {
+		UserResults struct {
+			Result UserResult `json:"result"`
+		} `json:"user_results"`
+	} `json:"core"`
+	Legacy TweetLegacy `json:"legacy"`
+}
+
+// UserResult holds information about a Twitter user.
+type UserResult struct {
+	Typename string `json:"__typename"`
+	Legacy   struct {
+		Name       string `json:"name"`
+		ScreenName string `json:"screen_name"`
+	} `json:"legacy"`
+}
+
+// TweetLegacy contains the textual content and metadata of a tweet.
+type TweetLegacy struct {
+	FullText      string `json:"full_text"`
+	CreatedAt     string `json:"created_at"`
+	FavoriteCount int    `json:"favorite_count"`
+	ReplyCount    int    `json:"reply_count"`
+	RetweetCount  int    `json:"retweet_count"`
+}
+
 // TwitterExtractor implements the Extractor interface for Twitter/X URLs
 type TwitterExtractor struct {
 	BaseExtractor
 	BrowserPool *browser.Pool
+	Config      *config.AppConfig
 }
 
 // NewTwitterExtractor creates a new TwitterExtractor
@@ -31,10 +98,12 @@ func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool,
 	return &TwitterExtractor{
 		BaseExtractor: NewBaseExtractor(appConfig, client),
 		BrowserPool:   browserPool,
+		Config:        appConfig,
 	}
 }
 
 // Extract fetches Twitter/X post content and comments
+
 func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("TwitterExtractor: Starting extraction for URL: %s", targetURL)
 
@@ -216,21 +285,54 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	} else {
 		log.Printf("TwitterExtractor: No saved session found, logging in")
 		if err := e.loginToTwitter(page); err != nil {
-		return nil, fmt.Errorf("login failed: %w", err)
+			return nil, fmt.Errorf("login failed: %w", err)
 		}
 		if err := e.saveCookies(page, cookiesFile); err != nil {
 			log.Printf("TwitterExtractor: Failed to save cookies: %v", err)
 		}
 	}
 
+	// Use a channel to receive the API response
+	apiResponseChan := make(chan *TweetDetailResponse)
+	errChan := make(chan error, 1)
+
+	// Set up request hijacking
+	router := page.HijackRequests()
+	defer router.Stop()
+
+	router.MustAdd("*TweetDetail*", func(ctx *rod.Hijack) {
+		err := ctx.LoadResponse(http.DefaultClient, true)
+		if err != nil {
+			errChan <- fmt.Errorf("could not load response: %w", err)
+			return
+		}
+
+		var apiResponse TweetDetailResponse
+		if err := json.Unmarshal(ctx.Response.Payload().Body, &apiResponse); err != nil {
+			errChan <- fmt.Errorf("error parsing TweetDetail JSON: %v", err)
+			return
+		}
+		apiResponseChan <- &apiResponse
+	})
+
+	go router.Run()
+
 	// Navigate to the tweet
 	log.Printf("TwitterExtractor: Navigating to tweet: %s", tweetURL)
-	page.MustNavigate(tweetURL)
-	page.MustWaitRequestIdle()
+	if err := page.Navigate(tweetURL); err != nil {
+		return nil, fmt.Errorf("failed to navigate to tweet: %w", err)
+	}
 
-	// Extract tweet content and comments
-	log.Printf("TwitterExtractor: Extracting tweet content and comments")
-	return e.extractTweetAndComments(page)
+	// Wait for the API response or timeout
+	select {
+	case apiResponse := <-apiResponseChan:
+		log.Printf("TwitterExtractor: Successfully captured TweetDetail API response")
+		return e.parseTweetDetailResponse(apiResponse)
+	case err := <-errChan:
+		return nil, err
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("timed out waiting for TweetDetail API response")
+	}
 }
 
 // loginToTwitter handles the login process
@@ -303,203 +405,66 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 	return nil
 }
 
-// extractTweetAndComments extracts the main tweet content and comments
-func (e *TwitterExtractor) extractTweetAndComments(page *rod.Page) (*TwitterData, error) {
-	var tweetData TwitterData
-
-	// Extract main tweet content
-	tweetContentSelectors := []string{
-		`[data-testid="tweetText"]`,
-		`article [lang]`,
-		`[role="article"] [lang]`,
+// parseTweetDetailResponse parses the API response and extracts tweet data.
+func (e *TwitterExtractor) parseTweetDetailResponse(apiResponse *TweetDetailResponse) (*TwitterData, error) {
+	tweetData := &TwitterData{
+		Comments: []TwitterComment{},
 	}
 
-	for _, selector := range tweetContentSelectors {
-		elements := page.MustElements(selector)
-		for _, element := range elements {
-			text := element.MustText()
-			if strings.TrimSpace(text) != "" && len(text) > 20 {
-				tweetData.TweetContent = text
-				break
-			}
-		}
-		if tweetData.TweetContent != "" {
-			break
-		}
-	}
-
-	// Extract tweet author
-	authorSelectors := []string{
-		`[data-testid="User-Name"] span`,
-		`article div[dir="ltr"] span`,
-		`[role="article"] span`,
-	}
-
-	for _, selector := range authorSelectors {
-		elements := page.MustElements(selector)
-		for _, element := range elements {
-			text := element.MustText()
-			if strings.Contains(text, "@") && strings.TrimSpace(text) != "" {
-				tweetData.TweetAuthor = text
-				break
-			}
-		}
-		if tweetData.TweetAuthor != "" {
-			break
-		}
-	}
-
-	// Extract comments with scrolling
-	log.Printf("TwitterExtractor: Scrolling to load comments")
-
-	var allComments []TwitterComment
-	maxScrolls := 8   // Back to 8 scrolls
-	maxComments := 50 // Back to 50 comments
-
-	for scroll := 0; scroll < maxScrolls && len(allComments) < maxComments; scroll++ {
-		articles := page.MustElements(`article`)
-
-		for _, article := range articles {
-			comment := e.extractCommentFromArticle(article)
-			if comment.Content != "" && comment.Username != "" {
-				// Check for duplicates
-				isDuplicate := false
-				for _, existing := range allComments {
-					if existing.Username == comment.Username && existing.Content == comment.Content {
-						isDuplicate = true
-						break
+	for _, instruction := range apiResponse.Data.ThreadedConversationWithInjectionsV2.Instructions {
+		if instruction.Type == "TimelineAddEntries" {
+			for _, entry := range instruction.Entries {
+				if strings.HasPrefix(entry.EntryID, "tweet-") {
+					tweetResult := entry.Content.ItemContent.TweetResults.Result
+					if tweetResult.Typename == "Tweet" {
+						tweetData.TweetContent = tweetResult.Legacy.FullText
+						if tweetResult.Core.UserResults.Result.Legacy.Name != "" {
+							tweetData.TweetAuthor = fmt.Sprintf("%s (@%s)", tweetResult.Core.UserResults.Result.Legacy.Name, tweetResult.Core.UserResults.Result.Legacy.ScreenName)
+						} else {
+							tweetData.TweetAuthor = "Unknown Author"
+						}
+					}
+				} else if strings.HasPrefix(entry.EntryID, "conversationthread-") {
+					for _, item := range entry.Content.Items {
+						tweetResult := item.Item.ItemContent.TweetResults.Result
+						if tweetResult.Typename == "Tweet" {
+							comment := TwitterComment{
+								Author:    tweetResult.Core.UserResults.Result.Legacy.Name,
+								Username:  "@" + tweetResult.Core.UserResults.Result.Legacy.ScreenName,
+								Content:   tweetResult.Legacy.FullText,
+								Timestamp: tweetResult.Legacy.CreatedAt,
+								Likes:     fmt.Sprintf("%d", tweetResult.Legacy.FavoriteCount),
+								Replies:   fmt.Sprintf("%d", tweetResult.Legacy.ReplyCount),
+								Retweets:  fmt.Sprintf("%d", tweetResult.Legacy.RetweetCount),
+							}
+							if comment.Author == "" {
+								comment.Author = "Unknown"
+							}
+							tweetData.Comments = append(tweetData.Comments, comment)
+						}
 					}
 				}
-
-				if !isDuplicate {
-					allComments = append(allComments, comment)
-				}
-			}
-		}
-
-		if scroll%2 == 0 {
-			log.Printf("TwitterExtractor: Found %d comments", len(allComments))
-		}
-
-		// Scroll to load more comments
-		// Scroll to load more comments
-		page.MustEval(`() => { window.scrollBy(0, 2000); }`)
-		page.MustWaitRequestIdle()
-	}
-
-	tweetData.Comments = allComments
-	tweetData.TotalComments = len(allComments)
-
-	return &tweetData, nil
-}
-
-// extractCommentFromArticle extracts comment data from an article element
-func (e *TwitterExtractor) extractCommentFromArticle(article *rod.Element) TwitterComment {
-	var comment TwitterComment
-
-	// Extract username
-	usernameElements, err := article.Elements(`[href^="/"]:not([href*="/status/"]):not([href*="/photo/"]):not([href*="/analytics"])`)
-	if err == nil {
-		for _, elem := range usernameElements {
-			href, err := elem.Attribute("href")
-			if err != nil {
-				continue
-			}
-			if href != nil && strings.HasPrefix(*href, "/") && !strings.Contains(*href, "/status/") {
-				username := strings.TrimPrefix(*href, "/")
-				if username != "" && !strings.Contains(username, "/") {
-					comment.Username = username
-					break
-				}
 			}
 		}
 	}
 
-	// Extract author display name
-	authorElements, err := article.Elements(`span`)
-	if err == nil {
-		for _, elem := range authorElements {
-			text := elem.MustText()
-			if strings.TrimSpace(text) != "" &&
-				!strings.Contains(text, "@") &&
-				!strings.Contains(text, "·") &&
-				!strings.Contains(text, "Reply") &&
-				!strings.Contains(text, "Repost") &&
-				!strings.Contains(text, "Like") &&
-				len(text) < 50 && len(text) > 2 {
-				comment.Author = text
-				break
-			}
-		}
+	tweetData.TotalComments = len(tweetData.Comments)
+
+	if tweetData.TweetContent == "" {
+		return nil, fmt.Errorf("could not find main tweet content in the API response")
 	}
 
-	// Extract comment content
-	contentElements, err := article.Elements(`[data-testid="tweetText"], [lang]`)
-	if err == nil {
-		for _, elem := range contentElements {
-			text := elem.MustText()
-			if strings.TrimSpace(text) != "" && len(text) > 10 {
-				comment.Content = text
-				break
-			}
-		}
-	}
-
-	// Extract timestamp
-	timeElements, err := article.Elements(`time`)
-	if err == nil {
-		for _, elem := range timeElements {
-			timestamp := elem.MustText()
-			if strings.TrimSpace(timestamp) != "" {
-				comment.Timestamp = timestamp
-				break
-			}
-		}
-	}
-
-	// Extract engagement stats
-	statElements, err := article.Elements(`[role="group"] span`)
-	if err == nil {
-		for _, elem := range statElements {
-			text := elem.MustText()
-			text = strings.TrimSpace(text)
-			if text != "" && (strings.Contains(text, "K") ||
-				(len(text) <= 4 && strings.ContainsAny(text, "0123456789"))) {
-				if comment.Replies == "" {
-					comment.Replies = text
-				} else if comment.Retweets == "" {
-					comment.Retweets = text
-				} else if comment.Likes == "" {
-					comment.Likes = text
-					break
-				}
-			}
-		}
-	}
-
-	return comment
+	return tweetData, nil
 }
 
 // saveCookies saves browser cookies to a file
 func (e *TwitterExtractor) saveCookies(page *rod.Page, filename string) error {
-	cookies := page.MustCookies()
-
-	var cookieData []map[string]interface{}
-	for _, cookie := range cookies {
-		cookieMap := map[string]interface{}{
-			"name":     cookie.Name,
-			"value":    cookie.Value,
-			"domain":   cookie.Domain,
-			"path":     cookie.Path,
-			"expires":  cookie.Expires,
-			"httpOnly": cookie.HTTPOnly,
-			"secure":   cookie.Secure,
-			"sameSite": cookie.SameSite,
-		}
-		cookieData = append(cookieData, cookieMap)
+	cookies, err := page.Cookies(nil)
+	if err != nil {
+		return fmt.Errorf("could not get cookies: %w", err)
 	}
 
-	jsonData, err := json.MarshalIndent(cookieData, "", "  ")
+	jsonData, err := json.MarshalIndent(cookies, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal cookies: %w", err)
 	}
