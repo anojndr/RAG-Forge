@@ -146,10 +146,28 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 
 	if maxChars != nil {
 		if data, ok := result.Data.(*TwitterData); ok {
-			if len(data.TweetContent) > *maxChars {
-				data.TweetContent = data.TweetContent[:*maxChars]
-				result.Data = data
+			data.TweetContent = truncateText(data.TweetContent, *maxChars)
+			
+			// Truncate comments as well
+			remainingChars := *maxChars - len(data.TweetContent)
+			if remainingChars > 0 {
+				var truncatedComments []TwitterComment
+				for _, comment := range data.Comments {
+					if remainingChars <= 0 {
+						break
+					}
+					if len(comment.Content) > remainingChars {
+						comment.Content = comment.Content[:remainingChars]
+					}
+					truncatedComments = append(truncatedComments, comment)
+					remainingChars -= len(comment.Content)
+				}
+				data.Comments = truncatedComments
+			} else {
+				data.Comments = []TwitterComment{}
 			}
+			
+			result.Data = data
 		}
 	}
 

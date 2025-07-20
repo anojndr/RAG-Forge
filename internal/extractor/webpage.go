@@ -99,7 +99,7 @@ func (e *WebpageExtractor) Extract(url string, maxChars *int) (*ExtractedResult,
 }
 
 // ExtractFromContent extracts content from a pre-fetched byte slice.
-func (e *WebpageExtractor) ExtractFromContent(url string, content []byte) (*ExtractedResult, error) {
+func (e *WebpageExtractor) ExtractFromContent(url string, content []byte, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("WebpageExtractor: Starting extraction from content for URL: %s", url)
 	result := &ExtractedResult{
 		URL:        url,
@@ -125,5 +125,15 @@ func (e *WebpageExtractor) ExtractFromContent(url string, content []byte) (*Extr
 	}
 
 	log.Printf("WebpageExtractor: Finished extracting from content for %s. Title: '%s', Text length: %d", url, pageTitle, textContentBuilder.Len())
+
+	if maxChars != nil {
+		if data, ok := result.Data.(WebpageData); ok {
+			if len(data.TextContent) > *maxChars {
+				data.TextContent = data.TextContent[:*maxChars]
+				result.Data = data
+			}
+		}
+	}
+
 	return result, nil
 }

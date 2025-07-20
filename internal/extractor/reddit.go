@@ -609,10 +609,28 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 
 	if maxChars != nil {
 		if data, ok := result.Data.(RedditData); ok {
-			if len(data.PostBody) > *maxChars {
-				data.PostBody = data.PostBody[:*maxChars]
-				result.Data = data
+			data.PostBody = truncateText(data.PostBody, *maxChars)
+			
+			// Truncate comments as well
+			remainingChars := *maxChars - len(data.PostBody)
+			if remainingChars > 0 {
+				var truncatedComments []RedditComment
+				for _, comment := range data.Comments {
+					if remainingChars <= 0 {
+						break
+					}
+					if len(comment.Body) > remainingChars {
+						comment.Body = comment.Body[:remainingChars]
+					}
+					truncatedComments = append(truncatedComments, comment)
+					remainingChars -= len(comment.Body)
+				}
+				data.Comments = truncatedComments
+			} else {
+				data.Comments = []RedditComment{}
 			}
+			
+			result.Data = data
 		}
 	}
 
@@ -707,3 +725,4 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 	log.Printf("RedditExtractor: Successfully extracted data via JSON method for %s", redditURL)
 	return jsonResult, nil
 }
+

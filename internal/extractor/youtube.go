@@ -155,10 +155,31 @@ func (e *YouTubeExtractor) Extract(videoURL string, maxChars *int) (*ExtractedRe
 
 	if maxChars != nil {
 		if data, ok := result.Data.(YouTubeData); ok {
-			if len(data.Transcript) > *maxChars {
-				data.Transcript = data.Transcript[:*maxChars]
-				result.Data = data
+			data.Transcript = truncateText(data.Transcript, *maxChars)
+			
+			// Truncate comments as well
+			remainingChars := *maxChars - len(data.Transcript)
+			if remainingChars > 0 {
+				var truncatedComments []interface{}
+				for _, comment := range data.Comments {
+					if remainingChars <= 0 {
+						break
+					}
+					commentMap := comment.(map[string]interface{})
+					text := commentMap["text"].(string)
+					if len(text) > remainingChars {
+						text = text[:remainingChars]
+					}
+					commentMap["text"] = text
+					truncatedComments = append(truncatedComments, commentMap)
+					remainingChars -= len(text)
+				}
+				data.Comments = truncatedComments
+			} else {
+				data.Comments = []interface{}{}
 			}
+			
+			result.Data = data
 		}
 	}
 
@@ -465,3 +486,4 @@ func (e *YouTubeExtractor) extractTranscriptWithTactiq(ctx context.Context, vide
 	}
 	return transcript, nil
 }
+
