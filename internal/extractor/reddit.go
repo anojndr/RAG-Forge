@@ -638,7 +638,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 }
 
 // Extract attempts to fetch Reddit data using API first, then falls back to JSON method
-func (e *RedditExtractor) Extract(redditURL string, maxChars *int) (*ExtractedResult, error) {
+func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("RedditExtractor: Starting extraction for URL: %s", redditURL)
 
 	result := &ExtractedResult{

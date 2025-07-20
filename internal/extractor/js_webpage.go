@@ -30,7 +30,7 @@ func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Poo
 }
 
 // Extract uses a headless browser (chromedp) to get the visible text from a URL.
-func (e *JSWebpageExtractor) Extract(url string, maxChars *int) (*ExtractedResult, error) {
+func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("JSWebpageExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
 		URL:        url,

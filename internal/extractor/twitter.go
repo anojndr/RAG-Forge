@@ -117,7 +117,7 @@ func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool,
 
 // Extract fetches Twitter/X post content and comments
 
-func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedResult, error) {
+func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("TwitterExtractor: Starting extraction for URL: %s", targetURL)
 
 	result := &ExtractedResult{
@@ -138,6 +138,12 @@ func (e *TwitterExtractor) Extract(targetURL string, maxChars *int) (*ExtractedR
 
 	if isProfileURL(targetURL) {
 		// Handle profile URL
+		if endpoint != "/extract" {
+			err := fmt.Errorf("twitter profile URL extraction is only available on the /extract endpoint")
+			result.Error = err.Error()
+			logger.LogError("TwitterExtractor: Attempted to extract profile from non-/extract endpoint for %s", targetURL)
+			return result, err
+		}
 		return e.extractFromProfileURL(ctx, targetURL, maxChars)
 	}
 

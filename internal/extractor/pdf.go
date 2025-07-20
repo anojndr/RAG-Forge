@@ -28,7 +28,7 @@ func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtra
 }
 
 // Extract downloads a PDF from a URL and extracts its text content using a native Go library.
-func (e *PDFExtractor) Extract(url string, maxChars *int) (*ExtractedResult, error) {
+func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("PDFExtractor: Starting extraction for URL: %s", url)
 	result := &ExtractedResult{
 		URL:        url,

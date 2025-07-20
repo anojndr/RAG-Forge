@@ -44,7 +44,7 @@ func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client, pytho
 }
 
 // Extract determines if the URL is a video or playlist and calls the appropriate handler.
-func (e *YouTubeExtractor) Extract(videoURL string, maxChars *int) (*ExtractedResult, error) {
+func (e *YouTubeExtractor) Extract(videoURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
 	log.Printf("YouTubeExtractor: Starting extraction for URL: %s", videoURL)
 
 	if playlistID := extractPlaylistID(videoURL); playlistID != "" {
