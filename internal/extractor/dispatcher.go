@@ -116,21 +116,9 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 		return result, err
 	}
 
-	// 3. Check for Twitter/X (only for /extract endpoint)
+	// 3. Check for Twitter/X
 	if IsTwitterDomain(hostname) {
 		log.Printf("Identified %s as Twitter/X URL", targetURL)
-
-		// Only process Twitter URLs via /extract endpoint
-		if endpoint != "/extract" {
-			log.Printf("Twitter extraction skipped - only available via /extract endpoint")
-			result := &ExtractedResult{
-				URL:                   targetURL,
-				SourceType:            "twitter",
-				ProcessedSuccessfully: false,
-				Error:                 "Twitter extraction is only available via /extract endpoint",
-			}
-			return result, fmt.Errorf("twitter extraction is only available via /extract endpoint")
-		}
 
 		if d.twitterExtractor != nil {
 			result, err := d.twitterExtractor.Extract(targetURL, maxChars)
