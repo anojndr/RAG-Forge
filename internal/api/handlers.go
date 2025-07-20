@@ -207,6 +207,12 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	resp.QueryDetails.ActualResultsFound = len(urls) // Number of URLs attempted
 	resp.Results = extractedResults
 
+	// Check if the context was cancelled (e.g., by timeout) before writing the response
+	if r.Context().Err() != nil {
+		log.Printf("Context cancelled for %s, not writing response", r.URL.Path)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -315,6 +321,12 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	resp.RequestDetails.URLsRequested = len(reqPayload.URLs)
 	resp.RequestDetails.URLsProcessed = len(extractedResults)
 	resp.Results = extractedResults
+
+	// Check if the context was cancelled (e.g., by timeout) before writing the response
+	if r.Context().Err() != nil {
+		log.Printf("Context cancelled for %s, not writing response", r.URL.Path)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

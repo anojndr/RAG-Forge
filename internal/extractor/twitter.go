@@ -298,7 +298,11 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 
 	// Set up request hijacking
 	router := page.HijackRequests()
-	defer router.Stop()
+	defer func() {
+		if err := router.Stop(); err != nil {
+			logger.LogError("TwitterExtractor: Error stopping router: %v", err)
+		}
+	}()
 
 	router.MustAdd("*TweetDetail*", func(ctx *rod.Hijack) {
 		err := ctx.LoadResponse(http.DefaultClient, true)
