@@ -14,24 +14,27 @@ Welcome to the complete documentation for RAG-Forge, a web content extraction AP
     - [GET /health](#get-health)
     - [Response Objects](#response-objects)
 6.  [Caching](#caching)
-7.  [Code Examples](#code-examples)
+7.  [Live Demo & Example Integration](#live-demo--example-integration)
+8.  [Code Examples](#code-examples)
     - [Python Example](#python-example)
     - [JavaScript Example](#javascript-example)
-8.  [Troubleshooting](#troubleshooting)
-9.  [Development & Testing](#development--testing)
+9.  [Troubleshooting](#troubleshooting)
+10. [Development & Testing](#development--testing)
 
 ---
 
 ## Features
 
--   **Dual Extraction Modes**: Search the web with a query (`/search`) or provide URLs directly (`/extract`). Each endpoint is optimized for its use case (speed vs. compatibility).
--   **Multi-Source Support**: Automatically extracts content from YouTube, Reddit, Twitter/X, PDFs, and standard webpages.
+-   **Dual Extraction Modes**:
+    -   `/search`: Optimized for speed. Uses a fast, non-JS-rendering extractor for quickly processing large volumes of standard web articles from search results.
+    -   `/extract`: Optimized for compatibility. Uses a full JS-enabled headless browser to handle complex, dynamic sites, single-page apps, and sources like Twitter/X.
+-   **Multi-Source Support**: Automatically extracts content from YouTube (videos and playlists), Reddit (posts, subreddits, user profiles), Twitter/X (tweets and user profiles), PDFs, and standard webpages.
 -   **Flexible Search Backend**: Use a self-hosted **SearxNG** instance or the commercial **Serper.dev** API. Supports a primary and fallback configuration.
 -   **Intelligent Extraction**:
     -   **Twitter/X**: Uses browser automation to log in and scrape full post content and comments. It can also extract the latest ~5 tweets from a user's profile page. Session cookies are saved to accelerate subsequent requests.
-    -   **YouTube**: Fetches metadata/comments via the official API and uses a robust Python-based transcript extractor (`youtube-transcript-api`) with automated dependency management in a local `venv`.
+    -   **YouTube**: Fetches metadata/comments via the official API and uses a robust Python-based transcript extractor (`youtube-transcript-api`) with automated dependency management in a local `venv`. Transcript extraction order is configurable.
     -   **Reddit**: Intelligently parses different Reddit URL types (posts, subreddits, user profiles) and extracts actual content, filtering out "load more" placeholders.
--   **Automatic Dependency Management**: On startup, the application validates system dependencies (`python`, `pip`, `pdftotext`) and automatically creates a Python virtual environment (`venv`) to install necessary packages.
+-   **Automatic Dependency Management**: On startup, the application validates system dependencies (`python`, `pip`) and automatically creates a Python virtual environment (`venv`) to install necessary packages. **No more manual `pip install` is required.**
 -   **Performance Optimized**: Utilizes concurrent processing for multiple URLs and a two-level caching system (in-memory or Redis) for both search queries and URL content.
 -   **Structured Output**: Returns clean, structured JSON data, perfect for feeding into LLMs or RAG systems.
 -   **Health Check**: Includes a `/health` endpoint for easy integration with monitoring and orchestration tools.
@@ -44,10 +47,7 @@ Before you begin, ensure you have the following dependencies installed and avail
 
 -   **Go**: Version 1.23.1 or higher.
 -   **Python**: Version 3.8 or higher, along with `pip`. The application will use these to create its own isolated environment.
--   **poppler-utils**: Provides `pdftotext` for PDF extraction.
-    -   **On Ubuntu/Debian**: `sudo apt-get update && sudo apt-get install -y poppler-utils`
-    -   **On macOS (Homebrew)**: `brew install poppler`
--   **Chromium-based Browser**: Required for Twitter/X extraction.
+-   **Chromium-based Browser**: Required for the `/extract` endpoint and Twitter/X features.
     -   Install Google Chrome, Chromium, or another compatible browser.
 
 ### 2. Python Packages
@@ -81,7 +81,7 @@ Configuration is managed via a `.env` file in the project root.
 
 | Variable                  | Description                                                                                               | Default                            | Required?                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
-| `PORT`                    | The port for the API server. *Note: Currently hardcoded to `8086` in `main.go`. This setting is for future use.* | `8080`                             | No                                 |
+| `PORT`                    | The port for the API server. *Note: The port is currently hardcoded to `8086` in `main.go` for simplicity.* | `8080`                             | No                                 |
 | `MAIN_SEARCH_ENGINE`      | The primary search engine. Can be `searxng` or `serper`.                                                    | `searxng`                          | No                                 |
 | `FALLBACK_SEARCH_ENGINE`  | The fallback engine if the primary fails. Can be `searxng`, `serper`, or empty.                           | `serper`                           | No                                 |
 | `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://localhost:18088`           | If using `searxng`                 |
@@ -109,7 +109,7 @@ With your dependencies installed and `.env` file configured, start the server wi
 go run main.go
 ```
 
-The server will log its startup status, port, and available endpoints to the console. It now runs on port **8086**.
+The server will log its startup status, port, and available endpoints to the console. It runs on port **8086**.
 
 ## API Reference
 
@@ -117,7 +117,7 @@ The API serves JSON and follows standard HTTP conventions. A successful request 
 
 ### POST /search
 
-Performs a web search, then extracts content from the top results. This endpoint is optimized for speed and uses a fast, non-JS-rendering extractor.
+Performs a web search, then extracts content from the top results. This endpoint is optimized for speed and uses a fast, **non-JS-rendering** extractor. It is best for processing standard articles and blogs.
 
 -   **Method**: `POST`
 -   **Path**: `/search`
@@ -145,7 +145,7 @@ curl -X POST http://localhost:8086/search \
 
 ### POST /extract
 
-Extracts content directly from a list of provided URLs. This endpoint **always uses a JS-enabled headless browser** to ensure compatibility with modern, dynamic websites.
+Extracts content directly from a list of provided URLs. This endpoint **always uses a JS-enabled headless browser** to ensure compatibility with modern, dynamic websites (like Twitter/X or single-page apps).
 
 -   **Method**: `POST`
 -   **Path**: `/extract`
@@ -243,6 +243,13 @@ This object represents the outcome of processing a single URL.
 }
 ```
 
+## Caching
+RAG-Forge implements a two-level caching strategy to improve performance and reduce redundant work:
+1.  **Search Cache:** Caches the list of URLs returned by a `/search` query. TTL is configured via `SEARCH_CACHE_TTL`.
+2.  **Content Cache:** Caches the `ExtractedResult` object for a specific URL. TTL is configured via `CONTENT_CACHE_TTL`.
+
+The cache can be run in-memory (`CACHE_TYPE=memory`) or with Redis (`CACHE_TYPE=redis`) for persistence across restarts.
+
 ## Live Demo & Example Integration
 
 You can see this API in action by checking out the **Discord AI Chatbot**, which uses RAG-Forge as its primary tool for web content extraction.
@@ -287,16 +294,14 @@ if __name__ == "__main__":
 
 -   **"No results found" for `/search`**:
     -   Verify your `MAIN_SEARCH_ENGINE` is configured correctly in `.env`.
-    -   If using SearxNG, ensure the instance at `SEARXNG_URL` is running.
+    -   If using SearxNG, ensure the instance at `SEARXNG_URL` is running and accessible.
     -   If using Serper, double-check that `SERPER_API_KEY` is correct.
 -   **Twitter/X extraction fails**:
-    -   Ensure a Chromium-based browser is installed.
+    -   Ensure a Chromium-based browser is installed and accessible in your system's PATH.
     -   Make sure your `TWITTER_USERNAME` and `TWITTER_PASSWORD` are correct.
-    -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login.
--   **YouTube extraction fails**:
-    -   Ensure Python 3.8+ and `pip` are installed. Check the console logs for any Python or `pip` errors during the automatic `venv` setup.
--   **PDF extraction fails**:
-    -   Ensure `pdftotext` (from `poppler-utils`) is installed and in your system's PATH.
+    -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login attempt.
+-   **YouTube transcript extraction fails**:
+    -   Ensure Python 3.8+ and `pip` are installed. Check the console logs for any Python or `pip` errors during the automatic `venv` setup. If the helper script fails, the API will still attempt to return other data like title and comments.
 -   **Server fails to start with "address already in use"**:
     -   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
 
