@@ -8,7 +8,15 @@ services:
     ports:
       - "8086:8086"
     environment:
+      # GOGC=50 is a good default for latency-sensitive APIs.
+      # It triggers GC more often, reducing pause times.
+      # Profile your app and adjust if needed:
+      # - Increase to 80 or 100 if CPU is maxed out.
+      # - Decrease to 30 if you have CPU to spare and want to minimize latency.
       - GOGC=50
+      # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
+      # For example, on an 8-thread machine, set BROWSER_POOL_SIZE=8 in your .env file.
+      - BROWSER_POOL_SIZE=8
     env_file:
       - .env
     depends_on:

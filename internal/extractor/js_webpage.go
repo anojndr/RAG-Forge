@@ -56,17 +56,20 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 
 	// Block more resource types for faster text-only extraction
 	router.MustAdd("*", func(ctx *rod.Hijack) {
-		switch ctx.Request.Type() {
-		// Allow navigation and fetching documents/scripts
-		case proto.NetworkResourceTypeDocument,
-			 proto.NetworkResourceTypeScript,
-			 proto.NetworkResourceTypeXHR,
-			 proto.NetworkResourceTypeFetch:
+		// Get the resource type
+		resType := ctx.Request.Type()
+
+		// Allow only the absolute minimum required for content
+		if resType == proto.NetworkResourceTypeDocument || resType == proto.NetworkResourceTypeXHR || resType == proto.NetworkResourceTypeFetch {
 			ctx.ContinueRequest(&proto.FetchContinueRequest{})
-		// Block everything else
-		default:
-			ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
 		}
+
+		// Block everything else, including scripts, unless a site absolutely needs them to render text
+		// For many simple SPA/dynamic sites, you might not even need 'Script'
+		// This is a tuning parameter: start by blocking scripts and see if it breaks sites.
+		// If it does, add 'proto.NetworkResourceTypeScript' to the allowed list.
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
 	})
 	// Your existing blocks for trackers can be kept or removed, as the above is more aggressive.
 	// router.MustAdd("*.google-analytics.com/*", ...

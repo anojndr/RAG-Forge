@@ -17,6 +17,8 @@ import (
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/worker"
+
+	"github.com/google/uuid"
 )
 
 var gzipWriterPool = sync.Pool{
@@ -24,6 +26,10 @@ var gzipWriterPool = sync.Pool{
 		return gzip.NewWriter(nil)
 	},
 }
+
+type contextKey string
+
+const requestIDKey contextKey = "requestID"
 
 func main() {
 	// Setup high-performance structured logging
@@ -47,12 +53,19 @@ func main() {
 
 	// Create a single, optimized HTTP client for all network requests
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 30 * time.Second, // Keep this reasonable
 		Transport: &http.Transport{
-			MaxIdleConns:        200, // Increased for high concurrency
-			MaxIdleConnsPerHost: 50,  // Increased from 20 to 50
-			IdleConnTimeout:     90 * time.Second,
-			ForceAttemptHTTP2:   true,
+			// Increase total idle connections significantly. This is the global pool size.
+			MaxIdleConns: 500,
+			// Increase per-host connections. Many requests will go to the same domains (google, youtube, reddit).
+			MaxIdleConnsPerHost: 100,
+			// Keep idle connections around for longer.
+			IdleConnTimeout: 120 * time.Second,
+			// Great choice, keep this.
+			ForceAttemptHTTP2: true,
+			// Add these for faster handshakes
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
 
@@ -104,10 +117,11 @@ func main() {
 
 	// Create compression and timeout middleware
 	handler := gzipMiddleware(timeoutMiddleware(mux))
+	requestIDHandler := requestIDMiddleware(handler)
 
 	server := &http.Server{
 		Addr:         ":8086",
-		Handler:      handler,
+		Handler:      requestIDHandler,
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -141,6 +155,19 @@ func main() {
 	}
 
 	slog.Info("Server exited gracefully")
+}
+
+func requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := uuid.New().String()
+		// Add ID to the response headers for client-side correlation
+		w.Header().Set("X-Request-ID", requestID)
+		// Create a context with the request ID
+		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
+		// Update the request with the new context
+		r = r.WithContext(ctx)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // gzipMiddleware remains the same but uses slog for logging

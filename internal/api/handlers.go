@@ -101,6 +101,11 @@ func isBrowserJob(url, endpoint string) bool {
 }
 
 func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, endpoint string) {
+	// Extract request ID from context
+	requestID, _ := r.Context().Value("requestID").(string)
+	// Create a logger with the request ID
+	logger := slog.With("request_id", requestID)
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		return
@@ -128,18 +133,18 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 			maxResults = 10
 		}
 
-		slog.Info("Handling search request", "query", query, "max_results", maxResults)
+		logger.Info("Handling search request", "query", query, "max_results", maxResults)
 
 		var err error
 		searchKey := getSearchCacheKey(query)
 		if cachedURLs, found := sh.Cache.GetSearchURLs(r.Context(), searchKey); found {
-			slog.Info("Search cache HIT", "query", query)
+			logger.Info("Search cache HIT", "query", query)
 			urls = cachedURLs
 		} else {
-			slog.Info("Search cache MISS", "query", query)
+			logger.Info("Search cache MISS", "query", query)
 			urls, err = sh.SearxNGClient.FetchResults(r.Context(), query, maxResults)
 			if err != nil {
-				slog.Error("Error fetching results from search engine(s)", "error", err)
+				logger.Error("Error fetching results from search engine(s)", "error", err)
 				sh.respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to fetch results from search engine(s): %v", err))
 				return
 			}
@@ -162,7 +167,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		}
 		urls = reqPayload.URLs
 		maxChars = reqPayload.MaxCharPerURL
-		slog.Info("Handling extract request", "url_count", len(urls))
+		logger.Info("Handling extract request", "url_count", len(urls))
 	}
 	defer r.Body.Close()
 
@@ -171,7 +176,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	var wg sync.WaitGroup
 	
 	cachedResults, uncachedURLs := sh.checkContentCache(r.Context(), urls, maxChars)
-	slog.Info("Content cache summary", "total", len(urls), "hits", len(cachedResults), "misses", len(uncachedURLs))
+	logger.Info("Content cache summary", "total", len(urls), "hits", len(cachedResults), "misses", len(uncachedURLs))
 
 	for _, cachedResult := range cachedResults {
 		resultsChan <- cachedResult
@@ -190,10 +195,10 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 
 		// Choose the correct worker pool
 		if isBrowserJob(targetURL, endpoint) {
-			slog.Debug("Dispatching to BROWSER worker pool", "url", targetURL)
+			logger.Debug("Dispatching to BROWSER worker pool", "url", targetURL)
 			sh.BrowserWorkerPool.JobQueue <- job
 		} else {
-			slog.Debug("Dispatching to HTTP worker pool", "url", targetURL)
+			logger.Debug("Dispatching to HTTP worker pool", "url", targetURL)
 			sh.HTTPWorkerPool.JobQueue <- job
 		}
 
@@ -202,9 +207,15 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 			defer wg.Done()
 			result := <-job.ResultChan
 			cacheKey := getContentCacheKey(job.URL, job.MaxChars)
+			
 			if result.Error != "" {
-				if checkIfErrorIsPermanent(fmt.Errorf(result.Error)) {
+				err := fmt.Errorf(result.Error)
+				// Cache permanent errors for a longer duration
+				if checkIfErrorIsPermanent(err) {
 					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute)
+				} else {
+					// Cache transient errors (like timeouts, 503s) for a very short time
+					sh.Cache.Set(r.Context(), cacheKey, result, 30*time.Second)
 				}
 			} else {
 				sh.Cache.Set(r.Context(), cacheKey, result, sh.Config.ContentCacheTTL)
@@ -227,9 +238,9 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		extractor.ExtractedResultPool.Put(res)
 	}
 
-	slog.Info("Finished all extractions", "count", len(finalResults))
+	logger.Info("Finished all extractions", "count", len(finalResults))
 	if r.Context().Err() != nil {
-		slog.Warn("Context cancelled, not writing response", "path", r.URL.Path)
+		logger.Warn("Context cancelled, not writing response", "path", r.URL.Path)
 		return
 	}
 
@@ -242,14 +253,14 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		resp.QueryDetails.MaxResultsRequested = maxResults
 		resp.QueryDetails.ActualResultsFound = len(urls)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("Error encoding final response", "error", err)
+			logger.Error("Error encoding final response", "error", err)
 		}
 	} else {
 		resp := ExtractResponsePayload{Results: finalResults}
 		resp.RequestDetails.URLsRequested = len(urls)
 		resp.RequestDetails.URLsProcessed = len(finalResults)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("Error encoding extract response", "error", err)
+			logger.Error("Error encoding extract response", "error", err)
 		}
 	}
 }
@@ -275,7 +286,7 @@ func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, m
 	if redisCache, isRedis := sh.Cache.(*cache.RedisCache); isRedis {
 		foundMap, err := redisCache.MGetExtractedResults(ctx, keysToCheck)
 		if err != nil {
-			slog.Warn("Redis MGET failed, falling back to individual gets", "error", err)
+			slog.Warn("Redis MGET failed, falling back to individual gets", "error", err) // Keep slog here as it's a system-level warning
 			// Fallback to individual gets if MGET fails
 			return sh.checkContentCacheIndividually(ctx, urls, maxChars)
 		}
@@ -319,7 +330,7 @@ func (sh *SearchHandler) respondWithError(w http.ResponseWriter, code int, messa
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
-		slog.Error("Error encoding error response", "error", err)
+		slog.Error("Error encoding error response", "error", err) // Keep slog here as it's a system-level warning
 	}
 }
 

@@ -2,10 +2,10 @@ package cache
 
 import (
 	"context"
-	"hash/fnv"
 	"time"
 	"web-search-api-for-llms/internal/extractor"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/patrickmn/go-cache"
 )
 
@@ -26,9 +26,9 @@ func NewShardedMemoryCache(defaultExpiration, cleanupInterval time.Duration) *Sh
 }
 
 func (c *ShardedMemoryCache) getShard(key string) *cache.Cache {
-	hasher := fnv.New64a()
+	// Use xxhash for faster hashing
+	hasher := xxhash.New()
 	hasher.Write([]byte(key))
-	// Bitwise AND is faster than modulo for powers of 2
 	return c.shards[hasher.Sum64()&(shardCount-1)]
 }
 
