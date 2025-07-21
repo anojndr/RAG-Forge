@@ -60,7 +60,12 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		resType := ctx.Request.Type()
 
 		// Allow only the absolute minimum required for content
-		if resType == proto.NetworkResourceTypeDocument || resType == proto.NetworkResourceTypeXHR || resType == proto.NetworkResourceTypeFetch {
+		// This is already a very good, aggressive setup.
+		// The only more aggressive step is to try blocking 'Script'
+		// and see which sites break.
+		if resType == proto.NetworkResourceTypeDocument ||
+			resType == proto.NetworkResourceTypeXHR ||
+			resType == proto.NetworkResourceTypeFetch { // Potentially add || resType == proto.NetworkResourceTypeScript
 			ctx.ContinueRequest(&proto.FetchContinueRequest{})
 			return
 		}

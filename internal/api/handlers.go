@@ -29,6 +29,11 @@ func GetJsoniter() jsoniter.API {
 
 // ... (Payload structs remain the same) ...
 
+var (
+	requestPayloadPool = sync.Pool{New: func() interface{} { return new(RequestPayload) }}
+	extractRequestPayloadPool = sync.Pool{New: func() interface{} { return new(ExtractRequestPayload) }}
+)
+
 type RequestPayload struct {
 	Query         string `json:"query"`
 	MaxResults    int    `json:"max_results"`
@@ -117,8 +122,12 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	var maxResults int
 
 	if endpoint == "/search" {
-		var reqPayload RequestPayload
-		if err := json.NewDecoder(r.Body).Decode(&reqPayload); err != nil {
+		reqPayload := requestPayloadPool.Get().(*RequestPayload)
+		defer func() {
+			*reqPayload = RequestPayload{} // Clear it
+			requestPayloadPool.Put(reqPayload)
+		}()
+		if err := json.NewDecoder(r.Body).Decode(reqPayload); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -151,8 +160,12 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 			sh.Cache.Set(r.Context(), searchKey, urls, sh.Config.SearchCacheTTL)
 		}
 	} else { // "/extract"
-		var reqPayload ExtractRequestPayload
-		if err := json.NewDecoder(r.Body).Decode(&reqPayload); err != nil {
+		reqPayload := extractRequestPayloadPool.Get().(*ExtractRequestPayload)
+		defer func() {
+			*reqPayload = ExtractRequestPayload{} // Clear it
+			extractRequestPayloadPool.Put(reqPayload)
+		}()
+		if err := json.NewDecoder(r.Body).Decode(reqPayload); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -270,9 +283,9 @@ func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, m
 	cachedResults []*extractor.ExtractedResult,
 	uncachedURLs []string,
 ) {
-    if len(urls) == 0 {
-        return nil, nil
-    }
+	if len(urls) == 0 {
+		return nil, nil
+	}
 
 	keysToCheck := make([]string, len(urls))
 	urlToCacheKey := make(map[string]string, len(urls))
@@ -282,32 +295,35 @@ func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, m
 		urlToCacheKey[u] = key
 	}
 
-	// Attempt batched fetch if using Redis
+	var foundMap map[string]*extractor.ExtractedResult
+	var err error
+
+	// Attempt batched fetch from either Redis or ShardedMemoryCache
 	if redisCache, isRedis := sh.Cache.(*cache.RedisCache); isRedis {
-		foundMap, err := redisCache.MGetExtractedResults(ctx, keysToCheck)
-		if err != nil {
-			slog.Warn("Redis MGET failed, falling back to individual gets", "error", err) // Keep slog here as it's a system-level warning
-			// Fallback to individual gets if MGET fails
-			return sh.checkContentCacheIndividually(ctx, urls, maxChars)
-		}
-
-		foundKeys := make(map[string]bool)
-		for key, result := range foundMap {
-			cachedResults = append(cachedResults, result)
-			foundKeys[key] = true
-		}
-
-		for _, u := range urls {
-			key := urlToCacheKey[u]
-			if !foundKeys[key] {
-				uncachedURLs = append(uncachedURLs, u)
-			}
-		}
-		return cachedResults, uncachedURLs
+		foundMap, err = redisCache.MGetExtractedResults(ctx, keysToCheck)
+	} else if shardedCache, isSharded := sh.Cache.(*cache.ShardedMemoryCache); isSharded { // ADD THIS
+		foundMap, err = shardedCache.MGetExtractedResults(ctx, keysToCheck) // USE THE NEW METHOD
 	}
 
-	// Fallback for in-memory cache or other cache types
-	return sh.checkContentCacheIndividually(ctx, urls, maxChars)
+	if err != nil || foundMap == nil { // If batched failed or not supported
+		slog.Warn("Cache MGET failed or not supported, falling back to individual gets", "error", err)
+		return sh.checkContentCacheIndividually(ctx, urls, maxChars)
+	}
+
+	// Process batched results
+	foundKeys := make(map[string]bool)
+	for key, result := range foundMap {
+		cachedResults = append(cachedResults, result)
+		foundKeys[key] = true
+	}
+
+	for _, u := range urls {
+		key := urlToCacheKey[u]
+		if !foundKeys[key] {
+			uncachedURLs = append(uncachedURLs, u)
+		}
+	}
+	return cachedResults, uncachedURLs
 }
 
 // checkContentCacheIndividually is the fallback for non-redis or failed MGET

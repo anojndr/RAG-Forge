@@ -16,9 +16,12 @@ services:
       - GOGC=50
       # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
       # For example, on an 8-thread machine, set BROWSER_POOL_SIZE=8 in your .env file.
-      - BROWSER_POOL_SIZE=8
+      - BROWSER_POOL_SIZE=4
     env_file:
       - .env
+    # This assigns the container to the first 4 CPU threads (0, 1, 2, 3)
+    # This is a Linux-only feature.
+    cpuset: "0-3"
     depends_on:
       - transcript-service
     command: ["./main"]

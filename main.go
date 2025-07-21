@@ -19,6 +19,7 @@ import (
 	"web-search-api-for-llms/internal/worker"
 
 	"github.com/google/uuid"
+	_ "go.uber.org/automaxprocs"
 )
 
 var gzipWriterPool = sync.Pool{

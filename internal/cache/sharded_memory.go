@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 	"web-search-api-for-llms/internal/extractor"
 
@@ -55,4 +56,46 @@ func (c *ShardedMemoryCache) GetSearchURLs(ctx context.Context, key string) ([]s
 func (c *ShardedMemoryCache) Set(ctx context.Context, key string, value interface{}, duration time.Duration) {
 	shard := c.getShard(key)
 	shard.Set(key, value, duration)
+}
+
+// MGetExtractedResults retrieves multiple ExtractedResults from the sharded cache concurrently.
+func (c *ShardedMemoryCache) MGetExtractedResults(ctx context.Context, keys []string) (map[string]*extractor.ExtractedResult, error) {
+	if len(keys) == 0 {
+		return make(map[string]*extractor.ExtractedResult), nil
+	}
+
+	// Group keys by shard index
+	keysByShard := make([][]string, shardCount)
+	for _, key := range keys {
+		hasher := xxhash.New()
+		hasher.Write([]byte(key))
+		shardIndex := hasher.Sum64() & (shardCount - 1)
+		keysByShard[shardIndex] = append(keysByShard[shardIndex], key)
+	}
+
+	resultsMap := make(map[string]*extractor.ExtractedResult)
+	var mu sync.Mutex // To protect the results map
+	var wg sync.WaitGroup
+
+	// Concurrently get keys from each shard that has them
+	for i, shardKeys := range keysByShard {
+		if len(shardKeys) > 0 {
+			wg.Add(1)
+			go func(shard *cache.Cache, keys []string) {
+				defer wg.Done()
+				for _, key := range keys {
+					if val, found := shard.Get(key); found {
+						if result, ok := val.(*extractor.ExtractedResult); ok {
+							mu.Lock()
+							resultsMap[key] = result
+							mu.Unlock()
+						}
+					}
+				}
+			}(c.shards[i], shardKeys)
+		}
+	}
+
+	wg.Wait()
+	return resultsMap, nil
 }
