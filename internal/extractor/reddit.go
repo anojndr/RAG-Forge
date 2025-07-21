@@ -349,24 +349,30 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	return result, nil
 }
 
-// flattenReplies recursively extracts and flattens comment replies.
-func (e *RedditExtractor) flattenReplies(children []struct{ RedditComment }) []RedditComment {
+// flattenRepliesIterative iteratively extracts and flattens comment replies.
+func (e *RedditExtractor) flattenRepliesIterative(initialChildren []struct{ RedditComment }) []RedditComment {
 	var comments []RedditComment
-	for _, child := range children {
+	stack := make([]struct{ RedditComment }, len(initialChildren))
+	copy(stack, initialChildren)
+
+	for len(stack) > 0 {
+		// Pop from stack
+		child := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
 		comment := child.RedditComment
 		if comment.Kind == "more" || comment.Body == "" || comment.Body == "[deleted]" || comment.Body == "[removed]" {
 			continue
 		}
 
-		// Get replies before clearing them to avoid deep nesting
+		// Get replies before clearing them
 		replies := comment.Replies.Data.Children
 		comment.Replies.Data.Children = nil
-
 		comments = append(comments, comment)
 
-		// Recurse for nested replies
-		if len(replies) > 0 {
-			comments = append(comments, e.flattenReplies(replies)...)
+		// Push replies to the stack (in reverse order to maintain original order)
+		for i := len(replies) - 1; i >= 0; i-- {
+			stack = append(stack, replies[i])
 		}
 	}
 	return comments
@@ -396,7 +402,7 @@ func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse)
 
 		// Recursively extract and flatten replies
 		if len(replies) > 0 {
-			comments = append(comments, e.flattenReplies(replies)...)
+			comments = append(comments, e.flattenRepliesIterative(replies)...)
 		}
 
 		// Limit to 50 comments for performance

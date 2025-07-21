@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// Initialize browser pool
-	browserPool, err := browser.NewPool(5) // Create a pool of 5 browsers
+	browserPool, err := browser.NewPool(appConfig.BrowserPoolSize)
 	if err != nil {
 		log.Fatalf("Failed to create browser pool: %v", err)
 	}
@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// Initialize Python helper pool
-	pythonPool, err := utils.NewPythonPool(5, func() (*utils.PythonHelper, error) {
+	pythonPool, err := utils.NewPythonPool(appConfig.PythonPoolSize, func() (*utils.PythonHelper, error) {
 		return utils.NewPythonHelper("internal/extractor/youtube_helper.py")
 	})
 	if err != nil {

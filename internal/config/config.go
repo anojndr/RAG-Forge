@@ -38,6 +38,8 @@ type AppConfig struct {
 	SearchCacheTTL time.Duration
 	ContentCacheTTL time.Duration
 	MaxConcurrentExtractions int
+	BrowserPoolSize          int
+	PythonPoolSize           int
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -74,7 +76,9 @@ func LoadConfig() (*AppConfig, error) {
 		RedisDB:       getEnvAsInt("REDIS_DB", 0),
 		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
-		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", 10),
+		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", getEnvAsInt("BROWSER_POOL_SIZE", 5)*2),
+		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 5),
+		PythonPoolSize:           getEnvAsInt("PYTHON_POOL_SIZE", 5),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -126,6 +130,14 @@ func (c *AppConfig) Validate() error {
 
 	if c.MaxConcurrentExtractions <= 0 {
 		return fmt.Errorf("invalid value for MAX_CONCURRENT_EXTRACTIONS: %d (must be greater than 0)", c.MaxConcurrentExtractions)
+	}
+
+	if c.BrowserPoolSize <= 0 {
+		return fmt.Errorf("invalid value for BROWSER_POOL_SIZE: %d (must be greater than 0)", c.BrowserPoolSize)
+	}
+
+	if c.PythonPoolSize <= 0 {
+		return fmt.Errorf("invalid value for PYTHON_POOL_SIZE: %d (must be greater than 0)", c.PythonPoolSize)
 	}
 
 	return nil
