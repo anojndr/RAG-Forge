@@ -3,10 +3,12 @@ package cache
 import (
 	"context"
 	"time"
+	"web-search-api-for-llms/internal/extractor"
 )
 
 // Cache is the interface for a cache.
 type Cache interface {
-	Get(ctx context.Context, key string) (interface{}, bool)
+	GetExtractedResult(ctx context.Context, key string) (*extractor.ExtractedResult, bool)
+	GetSearchURLs(ctx context.Context, key string) ([]string, bool)
 	Set(ctx context.Context, key string, value interface{}, duration time.Duration)
 }

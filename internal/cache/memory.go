@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"time"
+	"web-search-api-for-llms/internal/extractor"
 
 	"github.com/patrickmn/go-cache"
 )
@@ -19,9 +20,24 @@ func NewMemoryCache(defaultExpiration, cleanupInterval time.Duration) *MemoryCac
 	}
 }
 
-// Get retrieves a value from the cache.
-func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, bool) {
-	return c.client.Get(key)
+// GetExtractedResult retrieves an ExtractedResult from the cache.
+func (c *MemoryCache) GetExtractedResult(ctx context.Context, key string) (*extractor.ExtractedResult, bool) {
+	if val, found := c.client.Get(key); found {
+		if result, ok := val.(*extractor.ExtractedResult); ok {
+			return result, true
+		}
+	}
+	return nil, false
+}
+
+// GetSearchURLs retrieves a slice of URLs from the cache.
+func (c *MemoryCache) GetSearchURLs(ctx context.Context, key string) ([]string, bool) {
+	if val, found := c.client.Get(key); found {
+		if urls, ok := val.([]string); ok {
+			return urls, true
+		}
+	}
+	return nil, false
 }
 
 // Set adds a value to the cache.

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -53,11 +54,16 @@ type ExtractResponsePayload struct {
 }
 
 // getContentCacheKey generates a cache key for content based on the URL and character limit.
+func getSearchCacheKey(query string) string {
+	return "search_cache:" + query
+}
+
 func getContentCacheKey(url string, maxChars *int) string {
-	if maxChars == nil {
-		return "content:" + url + ":full"
+	key := "content_cache:" + url
+	if maxChars != nil {
+		key = fmt.Sprintf("%s:%d", key, *maxChars)
 	}
-	return fmt.Sprintf("content:%s:%d", url, *maxChars)
+	return key
 }
 
 // checkIfErrorIsPermanent checks if an error is likely to be permanent (e.g., 404 Not Found).
@@ -67,9 +73,20 @@ func checkIfErrorIsPermanent(err error) bool {
 	if err == nil {
 		return false
 	}
-	// For this example, we'll consider any error permanent.
-	// A better implementation would check for specific error strings like "404" or "not found".
-	return true
+	errStr := err.Error()
+
+	// Check for specific error variables
+	if errors.Is(err, extractor.ErrUnsupportedContentType) || errors.Is(err, extractor.ErrNotPDF) {
+		return true
+	}
+
+	// Check for common permanent HTTP error substrings
+	// This is a pragmatic approach without full HTTP response parsing.
+	return strings.Contains(errStr, "404 Not Found") ||
+		strings.Contains(errStr, "410 Gone") ||
+		strings.Contains(errStr, "failed to get tweet") || // Specific to Twitter extractor
+		strings.Contains(errStr, "video unavailable") || // Specific to YouTube
+		strings.Contains(errStr, "no such host")
 }
 
 // getTaskWeight determines the weight of a task based on the URL and endpoint.
@@ -141,9 +158,10 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// At the top of HandleSearch
-	if cachedURLs, found := sh.Cache.Get(r.Context(), "search:"+reqPayload.Query); found {
+	searchKey := getSearchCacheKey(reqPayload.Query)
+	if cachedURLs, found := sh.Cache.GetSearchURLs(r.Context(), searchKey); found {
 		log.Printf("Search cache HIT for query: %s", reqPayload.Query)
-		urls = cachedURLs.([]string)
+		urls = cachedURLs
 	} else {
 		log.Printf("Search cache MISS for query: %s", reqPayload.Query)
 		// ... fetch from SearxNG/Serper
@@ -162,7 +180,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		sh.Cache.Set(r.Context(), "search:"+reqPayload.Query, urls, sh.Config.SearchCacheTTL)
+		sh.Cache.Set(r.Context(), searchKey, urls, sh.Config.SearchCacheTTL)
 	}
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
@@ -173,9 +191,9 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	for _, targetURL := range urls {
 		// Check cache before dispatching job
 		cacheKey := getContentCacheKey(targetURL, reqPayload.MaxCharPerURL)
-		if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+		if cachedResult, found := sh.Cache.GetExtractedResult(r.Context(), cacheKey); found {
 			log.Printf("Content cache HIT for URL: %s", targetURL)
-			resultsChan <- cachedResult.(*extractor.ExtractedResult)
+			resultsChan <- cachedResult
 			continue
 		}
 
@@ -276,9 +294,9 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	for _, targetURL := range reqPayload.URLs {
 		// Check cache before dispatching job
 		cacheKey := getContentCacheKey(targetURL, reqPayload.MaxCharPerURL)
-		if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+		if cachedResult, found := sh.Cache.GetExtractedResult(r.Context(), cacheKey); found {
 			log.Printf("Content cache HIT for URL: %s", targetURL)
-			resultsChan <- cachedResult.(*extractor.ExtractedResult)
+			resultsChan <- cachedResult
 			continue
 		}
 

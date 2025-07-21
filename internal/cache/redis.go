@@ -27,27 +27,32 @@ func NewRedisCache(addr, password string, db int) *RedisCache {
 	return &RedisCache{client: rdb}
 }
 
-// Get retrieves a value from the cache.
-func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, bool) {
+// GetExtractedResult retrieves an ExtractedResult from the cache.
+func (c *RedisCache) GetExtractedResult(ctx context.Context, key string) (*extractor.ExtractedResult, bool) {
 	val, err := c.client.Get(ctx, key).Result()
-	if err != nil { // Handles redis.Nil and other errors
+	if err != nil {
 		return nil, false
 	}
-
-	// We need a way to unmarshal back into the correct type.
-	// A simple approach for this app is to assume it's always an ExtractedResult.
 	var result extractor.ExtractedResult
 	if err := json.Unmarshal([]byte(val), &result); err != nil {
-		// This could also be a simple string (for search results). Try that too.
-		var urls []string
-		if err2 := json.Unmarshal([]byte(val), &urls); err2 == nil {
-			return urls, true
-		}
-
-		logger.LogError("RedisCache: Failed to unmarshal value for key %s: %v", key, err)
+		logger.LogError("RedisCache: Failed to unmarshal ExtractedResult for key %s: %v", key, err)
 		return nil, false
 	}
 	return &result, true
+}
+
+// GetSearchURLs retrieves a slice of URLs from the cache.
+func (c *RedisCache) GetSearchURLs(ctx context.Context, key string) ([]string, bool) {
+	val, err := c.client.Get(ctx, key).Result()
+	if err != nil {
+		return nil, false
+	}
+	var urls []string
+	if err := json.Unmarshal([]byte(val), &urls); err != nil {
+		logger.LogError("RedisCache: Failed to unmarshal URL slice for key %s: %v", key, err)
+		return nil, false
+	}
+	return urls, true
 }
 
 // Set adds a value to the cache.
