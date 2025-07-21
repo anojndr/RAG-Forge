@@ -3,8 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,13 +11,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
 	"web-search-api-for-llms/internal/api"
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/extractor"
-	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/worker"
 )
 
@@ -29,34 +26,31 @@ var gzipWriterPool = sync.Pool{
 }
 
 func main() {
-	// Setup logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	// Setup high-performance structured logging
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
 
 	// Load configuration
 	appConfig, err := config.LoadConfig()
 	if err != nil {
-		logger.LogError("Failed to load configuration: %v", err)
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
-
-	// Validate system dependencies
-	log.Println("Validating system dependencies...")
-	// TODO: Add a check for pdftotext if it's still needed.
-	log.Println("Skipping Python dependency validation as it is no longer required.")
 
 	// Initialize browser pool
 	browserPool, err := browser.NewPool(appConfig.BrowserPoolSize)
 	if err != nil {
-		log.Fatalf("Failed to create browser pool: %v", err)
+		slog.Error("Failed to create browser pool", "error", err)
+		os.Exit(1)
 	}
 	defer browserPool.Cleanup()
 
 	// Create a single, optimized HTTP client for all network requests
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second, // Generous timeout for extractors
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
+			MaxIdleConns:        200, // Increased for high concurrency
+			MaxIdleConnsPerHost: 20,  // Increased for high concurrency
 			IdleConnTimeout:     90 * time.Second,
 			ForceAttemptHTTP2:   true,
 		},
@@ -66,23 +60,31 @@ func main() {
 	var appCache cache.Cache
 	switch appConfig.CacheType {
 	case "redis":
-		log.Println("Using Redis cache")
+		slog.Info("Using Redis cache")
 		appCache = cache.NewRedisCache(appConfig.RedisURL, appConfig.RedisPassword, appConfig.RedisDB)
 	default:
-		log.Println("Using in-memory cache")
+		slog.Info("Using in-memory cache")
 		appCache = cache.NewMemoryCache(10*time.Minute, 15*time.Minute)
 	}
 
 	// Create a single dispatcher instance
 	dispatcher := extractor.NewDispatcher(appConfig, browserPool, httpClient)
 
-	// Initialize and start the global worker pool
-	workerPool := worker.NewWorkerPool(dispatcher, appConfig.MaxConcurrentExtractions, 100)
-	workerPool.Start()
-	defer workerPool.Stop()
+	// === DUAL WORKER POOL INITIALIZATION ===
+	// A small pool for heavy, browser-based jobs
+	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*2)
+	browserWorkerPool.Start()
+	defer browserWorkerPool.Stop()
+	slog.Info("Browser worker pool started", "size", appConfig.BrowserPoolSize)
 
-	// Initialize handlers, passing the worker pool
-	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache, workerPool)
+	// A large pool for light, HTTP-based jobs
+	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.MaxConcurrentExtractions, 200)
+	httpWorkerPool.Start()
+	defer httpWorkerPool.Stop()
+	slog.Info("HTTP worker pool started", "size", appConfig.MaxConcurrentExtractions)
+
+	// Initialize handlers, passing the worker pools
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache, httpWorkerPool, browserWorkerPool)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
@@ -93,8 +95,10 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if _, err := fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().Format(time.RFC3339)); err != nil {
-			logger.LogError("Warning: failed to write health check response: %v", err)
+		// Use jsoniter for consistency and performance
+		jsoniter := api.GetJsoniter()
+		if err := jsoniter.NewEncoder(w).Encode(map[string]string{"status": "healthy", "timestamp": time.Now().Format(time.RFC3339)}); err != nil {
+			slog.Warn("Failed to write health check response", "error", err)
 		}
 	})
 
@@ -104,32 +108,27 @@ func main() {
 	server := &http.Server{
 		Addr:         ":8086",
 		Handler:      handler,
-		ReadTimeout:  60 * time.Second,  // Increased from 30s
-		WriteTimeout: 120 * time.Second, // Increased from 30s for Twitter extraction
-		IdleTimeout:  120 * time.Second, // Increased from 60s
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting server on port 8086")
-		log.Printf("Available endpoints:")
-		log.Printf("  POST /search  - Search and extract content from search results")
-		log.Printf("  POST /extract - Extract content from provided URLs")
-		log.Printf("  GET  /health  - Health check endpoint")
+		slog.Info("Starting server", "port", 8086)
+		slog.Info("Available endpoints", "endpoints", []string{"POST /search", "POST /extract", "GET /health"})
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.LogError("Server failed to start: %v", err)
-			log.Fatalf("Server failed to start: %v", err)
+			slog.Error("Server failed to start", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	// Wait for interrupt signal
 	<-quit
-	log.Println("Shutting down server...")
+	slog.Info("Shutting down server...")
 
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -137,37 +136,30 @@ func main() {
 
 	// Shutdown server gracefully
 	if err := server.Shutdown(ctx); err != nil {
-		logger.LogError("Server forced to shutdown: %v", err)
+		slog.Error("Server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
 
-	log.Println("Server exited gracefully")
+	slog.Info("Server exited gracefully")
 }
 
-// gzipMiddleware compresses responses when the client supports it
+// gzipMiddleware remains the same but uses slog for logging
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if client supports gzip
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		// Set gzip headers
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
-
-		// Get a gzip writer from the pool
 		gw := gzipWriterPool.Get().(*gzip.Writer)
 		gw.Reset(w)
 		defer func() {
 			if err := gw.Close(); err != nil {
-				logger.LogError("Error closing gzip writer: %v", err)
+				slog.Warn("Error closing gzip writer", "error", err)
 			}
 			gzipWriterPool.Put(gw)
 		}()
-
-		// Wrap response writer
 		grw := &gzipResponseWriter{ResponseWriter: w, writer: gw}
 		next.ServeHTTP(grw, r)
 	})
@@ -187,30 +179,22 @@ func (w *gzipResponseWriter) Header() http.Header {
 	return w.ResponseWriter.Header()
 }
 
-// timeoutMiddleware adds request timeout handling
+// timeoutMiddleware remains the same but uses slog for logging
 func timeoutMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set a reasonable timeout for requests
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute) // 3 minutes for Twitter extraction
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 		defer cancel()
-
-		// Create new request with timeout context
 		r = r.WithContext(ctx)
-
-		// Handle timeout
 		done := make(chan struct{})
 		go func() {
 			next.ServeHTTP(w, r)
 			close(done)
 		}()
-
 		select {
 		case <-done:
-			// Request completed successfully
 			return
 		case <-ctx.Done():
-			// Request timed out
-			logger.LogError("Request timed out: %s %s", r.Method, r.URL.Path)
+			slog.Warn("Request timed out", "method", r.Method, "path", r.URL.Path)
 			http.Error(w, "Request timeout", http.StatusGatewayTimeout)
 			return
 		}

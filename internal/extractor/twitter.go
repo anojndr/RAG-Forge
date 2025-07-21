@@ -2,7 +2,6 @@ package extractor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,10 +14,10 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	jsoniter "github.com/json-iterator/go"
 
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
-	"web-search-api-for-llms/internal/logger"
 )
 
 // TweetDetailResponse defines the structure for the entire JSON response from the Twitter API.
@@ -104,6 +103,7 @@ type TwitterExtractor struct {
 	BaseExtractor
 	BrowserPool *browser.Pool
 	Config      *config.AppConfig
+	cookieMutex sync.RWMutex // Mutex for cookie file access
 }
 
 // NewTwitterExtractor creates a new TwitterExtractor
@@ -132,7 +132,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	// Check if we have Twitter credentials
 	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
 		result.Error = "Twitter credentials not configured"
-		logger.LogError("TwitterExtractor: Missing Twitter credentials for %s", targetURL)
+		log.Printf("TwitterExtractor: Missing Twitter credentials for %s", targetURL)
 		return result, fmt.Errorf(result.Error)
 	}
 
@@ -141,7 +141,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 		if endpoint != "/extract" {
 			err := fmt.Errorf("twitter profile URL extraction is only available on the /extract endpoint")
 			result.Error = err.Error()
-			logger.LogError("TwitterExtractor: Attempted to extract profile from non-/extract endpoint for %s", targetURL)
+			log.Printf("TwitterExtractor: Attempted to extract profile from non-/extract endpoint for %s", targetURL)
 			return result, err
 		}
 		return e.extractFromProfileURL(ctx, targetURL, maxChars)
@@ -151,7 +151,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	tweetID := extractTweetID(targetURL)
 	if tweetID == "" {
 		result.Error = "could not extract tweet ID from URL"
-		logger.LogError("TwitterExtractor: Error for %s: %s", targetURL, result.Error)
+		log.Printf("TwitterExtractor: Error for %s: %s", targetURL, result.Error)
 		return result, fmt.Errorf(result.Error)
 	}
 
@@ -161,7 +161,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, targetURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("extraction failed: %v", err)
-		logger.LogError("TwitterExtractor: Error extracting data for %s: %v", targetURL, err)
+		log.Printf("TwitterExtractor: Error extracting data for %s: %v", targetURL, err)
 		return result, err
 	}
 
@@ -353,7 +353,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	router := page.HijackRequests()
 	defer func() {
 		if err := router.Stop(); err != nil {
-			logger.LogError("TwitterExtractor: Error stopping router: %v", err)
+			log.Printf("TwitterExtractor: Error stopping router: %v", err)
 		}
 	}()
 
@@ -365,6 +365,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 		}
 
 		var apiResponse TweetDetailResponse
+		json := jsoniter.ConfigCompatibleWithStandardLibrary
 		if err := json.Unmarshal(ctx.Response.Payload().Body, &apiResponse); err != nil {
 			errChan <- fmt.Errorf("error parsing TweetDetail JSON: %v", err)
 			return
@@ -516,11 +517,16 @@ func (e *TwitterExtractor) parseTweetDetailResponse(apiResponse *TweetDetailResp
 
 // saveCookies saves browser cookies to a file
 func (e *TwitterExtractor) saveCookies(page *rod.Page, filename string) error {
+	e.cookieMutex.Lock()
+	defer e.cookieMutex.Unlock()
+
 	cookies, err := page.Cookies(nil)
 	if err != nil {
 		return fmt.Errorf("could not get cookies: %w", err)
 	}
 
+	// Use jsoniter for performance
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	jsonData, err := json.MarshalIndent(cookies, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal cookies: %w", err)
@@ -537,6 +543,9 @@ func (e *TwitterExtractor) saveCookies(page *rod.Page, filename string) error {
 
 // loadCookies loads browser cookies from a file
 func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
+	e.cookieMutex.RLock()
+	defer e.cookieMutex.RUnlock()
+
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		return false
 	}
@@ -547,6 +556,8 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 		return false
 	}
 
+	// Use jsoniter for performance
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	var cookieData []map[string]interface{}
 	err = json.Unmarshal(data, &cookieData)
 	if err != nil {
@@ -554,31 +565,18 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 		return false
 	}
 
+	var cookies []*proto.NetworkCookieParam
 	for _, cookieMap := range cookieData {
 		cookie := &proto.NetworkCookieParam{}
-
-		if name, ok := cookieMap["name"].(string); ok {
-			cookie.Name = name
-		}
-		if value, ok := cookieMap["value"].(string); ok {
-			cookie.Value = value
-		}
-		if domain, ok := cookieMap["domain"].(string); ok {
-			cookie.Domain = domain
-		}
-		if path, ok := cookieMap["path"].(string); ok {
-			cookie.Path = path
-		}
-		if httpOnly, ok := cookieMap["httpOnly"].(bool); ok {
-			cookie.HTTPOnly = httpOnly
-		}
-		if secure, ok := cookieMap["secure"].(bool); ok {
-			cookie.Secure = secure
-		}
-
-		page.MustSetCookies(cookie)
+		if name, ok := cookieMap["name"].(string); ok { cookie.Name = name }
+		if value, ok := cookieMap["value"].(string); ok { cookie.Value = value }
+		if domain, ok := cookieMap["domain"].(string); ok { cookie.Domain = domain }
+		if path, ok := cookieMap["path"].(string); ok { cookie.Path = path }
+		if httpOnly, ok := cookieMap["httpOnly"].(bool); ok { cookie.HTTPOnly = httpOnly }
+		if secure, ok := cookieMap["secure"].(bool); ok { cookie.Secure = secure }
+		cookies = append(cookies, cookie)
 	}
-
+	page.MustSetCookies(cookies...)
 	return true
 }
 
@@ -592,7 +590,7 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 	tweetURLs, err := e.extractTweetURLsFromProfile(ctx, profileURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to extract tweet URLs from profile: %v", err)
-		logger.LogError("TwitterExtractor: Error for %s: %s", profileURL, result.Error)
+		log.Printf("TwitterExtractor: Error for %s: %s", profileURL, result.Error)
 		return result, err
 	}
 
@@ -605,13 +603,13 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 			defer wg.Done()
 			tweetID := extractTweetID(tURL)
 			if tweetID == "" {
-				logger.LogError("TwitterExtractor: Could not extract tweet ID from %s", tURL)
+				log.Printf("TwitterExtractor: Could not extract tweet ID from %s", tURL)
 				return
 			}
 
 			tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, tURL)
 			if err != nil {
-				logger.LogError("TwitterExtractor: Failed to extract data for tweet %s: %v", tURL, err)
+				log.Printf("TwitterExtractor: Failed to extract data for tweet %s: %v", tURL, err)
 				return
 			}
 			tweetExtracts <- TweetExtract{URL: tURL, Data: tweetData}
