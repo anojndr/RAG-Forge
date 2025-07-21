@@ -63,8 +63,8 @@ func main() {
 		slog.Info("Using Redis cache")
 		appCache = cache.NewRedisCache(appConfig.RedisURL, appConfig.RedisPassword, appConfig.RedisDB)
 	default:
-		slog.Info("Using in-memory cache")
-		appCache = cache.NewMemoryCache(10*time.Minute, 15*time.Minute)
+		slog.Info("Using sharded in-memory cache")
+		appCache = cache.NewShardedMemoryCache(10*time.Minute, 15*time.Minute)
 	}
 
 	// Create a single dispatcher instance
@@ -72,13 +72,13 @@ func main() {
 
 	// === DUAL WORKER POOL INITIALIZATION ===
 	// A small pool for heavy, browser-based jobs
-	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*2)
+	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*10) // Increased buffer
 	browserWorkerPool.Start()
 	defer browserWorkerPool.Stop()
 	slog.Info("Browser worker pool started", "size", appConfig.BrowserPoolSize)
 
 	// A large pool for light, HTTP-based jobs
-	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*2)
+	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*10) // Increased buffer
 	httpWorkerPool.Start()
 	defer httpWorkerPool.Stop()
 	slog.Info("HTTP worker pool started", "size", appConfig.HTTPWorkerPoolSize)

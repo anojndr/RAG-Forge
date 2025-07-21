@@ -17,7 +17,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -v -o main .
 
 # Start a new stage from scratch for a smaller image.
-FROM alpine:latest
+FROM gcr.io/distroless/static-debian11
 
 # Set the working directory.
 WORKDIR /root/

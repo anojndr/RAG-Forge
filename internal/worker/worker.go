@@ -42,11 +42,11 @@ func (wp *WorkerPool) Start() {
 				slog.Debug("Worker processing job", "worker_id", workerID, "url", job.URL)
 				result, err := wp.Dispatcher.DispatchAndExtractWithContext(job.URL, job.Endpoint, job.MaxChars)
 				if err != nil {
-					result = &extractor.ExtractedResult{
-						URL:                   job.URL,
-						ProcessedSuccessfully: false,
-						Error:                 err.Error(),
-					}
+					// Get a result from the pool instead of allocating
+					result = extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
+					result.URL = job.URL
+					result.ProcessedSuccessfully = false
+					result.Error = err.Error()
 				}
 				job.ResultChan <- result
 			}

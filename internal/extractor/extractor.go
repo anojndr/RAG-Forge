@@ -2,6 +2,7 @@ package extractor
 
 import (
 	nethttp "net/http" // Aliased http import
+	"sync"
 
 	"web-search-api-for-llms/internal/config"
 )
@@ -14,6 +15,22 @@ type ExtractedResult struct {
 	ProcessedSuccessfully bool        `json:"processed_successfully"`
 	Data                  interface{} `json:"data,omitempty"` // Can be YouTubeData, RedditData, PDFData, WebpageData
 	Error                 string      `json:"error,omitempty"`
+}
+
+// ExtractedResultPool is a pool for reusing ExtractedResult objects to reduce allocations.
+var ExtractedResultPool = sync.Pool{
+	New: func() interface{} {
+		return new(ExtractedResult)
+	},
+}
+
+// Reset clears the fields of the ExtractedResult so it can be safely reused.
+func (er *ExtractedResult) Reset() {
+	er.URL = ""
+	er.SourceType = ""
+	er.ProcessedSuccessfully = false
+	er.Data = nil
+	er.Error = ""
 }
 
 // Specific data structures for each source type

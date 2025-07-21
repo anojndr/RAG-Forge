@@ -3,7 +3,6 @@ package searxng
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,10 +12,13 @@ import (
 	"strings"
 	"sync"
 
+	jsoniter "github.com/json-iterator/go"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/useragent"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 // SearxNGResultItem matches the structure of individual items in SearxNG's JSON output.
 type SearxNGResultItem struct {
@@ -30,14 +32,14 @@ type SearxNGResultItem struct {
 
 // SearxNGResponse matches the top-level structure of SearxNG's JSON output.
 type SearxNGResponse struct {
-	Query               string              `json:"query"`
-	NumberOfResults     int                 `json:"number_of_results"` // This might be total results, not per page.
-	Results             []SearxNGResultItem `json:"results"`
-	Answers             []json.RawMessage   `json:"answers,omitempty"`     // Using json.RawMessage for fields with variable structure
-	Corrections         []json.RawMessage   `json:"corrections,omitempty"` // Or define specific structs if structure is known and needed
-	Infoboxes           []json.RawMessage   `json:"infoboxes,omitempty"`
-	Suggestions         []string            `json:"suggestions,omitempty"`
-	UnresponsiveEngines [][]string          `json:"unresponsive_engines,omitempty"`
+	Query               string                `json:"query"`
+	NumberOfResults     int                   `json:"number_of_results"` // This might be total results, not per page.
+	Results             []SearxNGResultItem   `json:"results"`
+	Answers             []jsoniter.RawMessage `json:"answers,omitempty"`     // Using json.RawMessage for fields with variable structure
+	Corrections         []jsoniter.RawMessage `json:"corrections,omitempty"` // Or define specific structs if structure is known and needed
+	Infoboxes           []jsoniter.RawMessage `json:"infoboxes,omitempty"`
+	Suggestions         []string              `json:"suggestions,omitempty"`
+	UnresponsiveEngines [][]string            `json:"unresponsive_engines,omitempty"`
 }
 
 // SerperOrganicResult defines the structure for a single organic result from Serper API.
@@ -50,7 +52,7 @@ type SerperOrganicResult struct {
 
 // SerperSearchResponse matches the top-level structure of Serper Search API's JSON output.
 type SerperSearchResponse struct {
-	SearchParameters json.RawMessage       `json:"searchParameters,omitempty"`
+	SearchParameters jsoniter.RawMessage   `json:"searchParameters,omitempty"`
 	Organic          []SerperOrganicResult `json:"organic"`
 	// Add other fields like relatedSearches, peopleAlsoAsk, etc. if needed
 }

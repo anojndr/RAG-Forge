@@ -222,6 +222,9 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	var finalResults []extractor.ExtractedResult
 	for res := range resultsChan {
 		finalResults = append(finalResults, *res)
+		// Put the object back in the pool after copying its data
+		res.Reset()
+		extractor.ExtractedResultPool.Put(res)
 	}
 
 	slog.Info("Finished all extractions", "count", len(finalResults))
