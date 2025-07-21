@@ -41,6 +41,7 @@ type AppConfig struct {
 	ContentCacheTTL time.Duration
 	MaxConcurrentExtractions int
 	BrowserPoolSize          int
+	JSExtractionTimeout  time.Duration
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -80,6 +81,7 @@ func LoadConfig() (*AppConfig, error) {
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
 		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", getEnvAsInt("BROWSER_POOL_SIZE", 5)*2),
 		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 5),
+		JSExtractionTimeout:  getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
 	}
 
 	if err := config.Validate(); err != nil {

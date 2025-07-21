@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/rod"
 
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
@@ -37,19 +37,44 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		SourceType: "webpage_js",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), e.Config.JSExtractionTimeout)
 	defer cancel()
 
 	browser := e.BrowserPool.Get()
 	defer e.BrowserPool.Return(browser)
 
-	page, err := browser.Page(proto.TargetCreateTarget{URL: ""})
+	page, err := browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to create page: %v", err)
 		logger.LogError(result.Error)
 		return result, err
 	}
 	defer page.MustClose()
+
+	router := page.HijackRequests()
+	defer router.Stop()
+
+	// Block common ad and tracker domains
+	router.MustAdd("*.google-analytics.com/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+	router.MustAdd("*.googlesyndication.com/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+	router.MustAdd("*.doubleclick.net/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+	router.MustAdd("*.disqus.com/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+	router.MustAdd("*.facebook.net/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+	router.MustAdd("*.twitter.com/widgets/*", func(ctx *rod.Hijack) {
+		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	})
+
+	go router.Run()
 
 	// Set user agent
 	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -85,10 +110,8 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		title = info.Title
 	}
 
-	// Scroll to the bottom of the page to trigger lazy loading, waiting for stability
-	if err := page.Context(ctx).WaitStable(2 * time.Second); err != nil {
-		logger.LogError("JSWebpageExtractor: Error waiting for page to be stable after scrolling for %s: %v", url, err)
-	}
+	// Wait for the body element to be ready
+	page.Context(ctx).MustElement("body")
 
 	// Select all text using JavaScript
 	_, err = page.Context(ctx).Eval(`() => {
