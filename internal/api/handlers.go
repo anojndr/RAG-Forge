@@ -2,12 +2,12 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
+	"strings"
 	"time"
 
 	"web-search-api-for-llms/internal/browser"
@@ -71,21 +71,41 @@ func checkIfErrorIsPermanent(err error) bool {
 	return true
 }
 
+// getTaskWeight determines the weight of a task based on the URL and endpoint.
+func getTaskWeight(url, endpoint string) int {
+	// The /extract endpoint always uses a browser
+	if endpoint == "/extract" {
+		return 5 // High weight
+	}
+
+	// For /search, determine by URL type
+	if strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com") {
+		return 5 // High weight
+	}
+
+	// Default for fast tasks
+	return 1
+}
+
 // SearchHandler holds dependencies for the search handler and manages HTTP request processing.
 type SearchHandler struct {
-	Config        *config.AppConfig
-	SearxNGClient *searxng.Client
-	Dispatcher    *extractor.Dispatcher
-	Cache         cache.Cache
+	Config             *config.AppConfig
+	SearxNGClient      *searxng.Client
+	Dispatcher         *extractor.Dispatcher
+	Cache              cache.Cache
+	concurrencyLimiter chan struct{}
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
 func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client, appCache cache.Cache) *SearchHandler {
+	// Total capacity, e.g., 20. Allows 20 fast tasks, or 4 browser tasks, or a mix.
+	totalWeightCapacity := 20
 	return &SearchHandler{
-		Config:        appConfig,
-		SearxNGClient: searxng.NewClient(appConfig, client),
-		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, client),
-		Cache:         appCache,
+		Config:             appConfig,
+		SearxNGClient:      searxng.NewClient(appConfig, client),
+		Dispatcher:         extractor.NewDispatcher(appConfig, browserPool, client),
+		Cache:              appCache,
+		concurrencyLimiter: make(chan struct{}, totalWeightCapacity),
 	}
 }
 
@@ -148,20 +168,67 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Successfully fetched %d URLs for query '%s'. Starting extraction with unlimited concurrency.", len(urls), reqPayload.Query)
 
-	// Use a worker pool to process URLs with a configurable number of workers.
-	jobs := make(chan string, len(urls))
 	resultsChan := make(chan *extractor.ExtractedResult, len(urls))
-
 	var wg sync.WaitGroup
-	for w := 0; w < sh.Config.MaxConcurrentExtractions; w++ {
-		wg.Add(1)
-		go sh.extractionWorker(r.Context(), &wg, jobs, resultsChan, "/search", reqPayload.MaxCharPerURL)
-	}
 
 	for _, targetURL := range urls {
-		jobs <- targetURL
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+
+			taskWeight := getTaskWeight(url, "/search")
+
+			// Acquire 'n' slots from the semaphore
+			for i := 0; i < taskWeight; i++ {
+				sh.concurrencyLimiter <- struct{}{}
+			}
+
+			// Release the slots when done
+			defer func() {
+				for i := 0; i < taskWeight; i++ {
+					<-sh.concurrencyLimiter
+				}
+			}()
+
+			// Panic recovery to prevent a single URL from crashing the entire worker.
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
+					resultsChan <- &extractor.ExtractedResult{
+						URL:                   url,
+						ProcessedSuccessfully: false,
+						Error:                 fmt.Sprintf("panic during processing: %v", rec),
+					}
+				}
+			}()
+
+			// Check cache before processing
+			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
+			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+				log.Printf("Content cache HIT for URL: %s", url)
+				resultsChan <- cachedResult.(*extractor.ExtractedResult)
+				return
+			}
+
+			log.Printf("Processing: %s (endpoint: /search)", url)
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", reqPayload.MaxCharPerURL)
+			if dispatchErr != nil {
+				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
+				result := &extractor.ExtractedResult{
+					URL:                   url,
+					ProcessedSuccessfully: false,
+					Error:                 dispatchErr.Error(),
+				}
+				if checkIfErrorIsPermanent(dispatchErr) {
+					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute) // Short TTL for failures
+				}
+				resultsChan <- result
+			} else {
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
+				resultsChan <- extractedData
+			}
+		}(targetURL)
 	}
-	close(jobs)
 
 	// Wait for all workers to finish and then close the results channel
 	go func() {
@@ -229,20 +296,67 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Handling extract request for %d URLs with unlimited concurrency", len(reqPayload.URLs))
 
-	// Use a worker pool to process URLs with a configurable number of workers.
-	jobs := make(chan string, len(reqPayload.URLs))
 	resultsChan := make(chan *extractor.ExtractedResult, len(reqPayload.URLs))
-
 	var wg sync.WaitGroup
-	for w := 0; w < sh.Config.MaxConcurrentExtractions; w++ {
-		wg.Add(1)
-		go sh.extractionWorker(r.Context(), &wg, jobs, resultsChan, "/extract", reqPayload.MaxCharPerURL)
-	}
 
 	for _, targetURL := range reqPayload.URLs {
-		jobs <- targetURL
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+
+			taskWeight := getTaskWeight(url, "/extract")
+
+			// Acquire 'n' slots from the semaphore
+			for i := 0; i < taskWeight; i++ {
+				sh.concurrencyLimiter <- struct{}{}
+			}
+
+			// Release the slots when done
+			defer func() {
+				for i := 0; i < taskWeight; i++ {
+					<-sh.concurrencyLimiter
+				}
+			}()
+
+			// Panic recovery to prevent a single URL from crashing the entire worker.
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
+					resultsChan <- &extractor.ExtractedResult{
+						URL:                   url,
+						ProcessedSuccessfully: false,
+						Error:                 fmt.Sprintf("panic during processing: %v", rec),
+					}
+				}
+			}()
+
+			// Check cache before processing
+			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
+			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+				log.Printf("Content cache HIT for URL: %s", url)
+				resultsChan <- cachedResult.(*extractor.ExtractedResult)
+				return
+			}
+
+			log.Printf("Processing: %s (endpoint: /extract)", url)
+			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", reqPayload.MaxCharPerURL)
+			if dispatchErr != nil {
+				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
+				result := &extractor.ExtractedResult{
+					URL:                   url,
+					ProcessedSuccessfully: false,
+					Error:                 dispatchErr.Error(),
+				}
+				if checkIfErrorIsPermanent(dispatchErr) {
+					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute) // Short TTL for failures
+				}
+				resultsChan <- result
+			} else {
+				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
+				resultsChan <- extractedData
+			}
+		}(targetURL)
 	}
-	close(jobs)
 
 	// Wait for all workers to finish and then close the results channel
 	go func() {
@@ -276,47 +390,4 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// extractionWorker is a reusable worker function for processing URLs from a channel.
-func (sh *SearchHandler) extractionWorker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan string, results chan<- *extractor.ExtractedResult, endpoint string, maxChars *int) {
-	defer wg.Done()
-	for url := range jobs {
-		// Panic recovery to prevent a single URL from crashing the entire worker.
-		defer func() {
-			if rec := recover(); rec != nil {
-				logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
-				results <- &extractor.ExtractedResult{
-					URL:                   url,
-					ProcessedSuccessfully: false,
-					Error:                 fmt.Sprintf("panic during processing: %v", rec),
-				}
-			}
-		}()
-
-		// Check cache before processing
-		cacheKey := getContentCacheKey(url, maxChars)
-		if cachedResult, found := sh.Cache.Get(ctx, cacheKey); found {
-			log.Printf("Content cache HIT for URL: %s", url)
-			results <- cachedResult.(*extractor.ExtractedResult)
-			continue
-		}
-
-		log.Printf("Processing: %s (endpoint: %s)", url, endpoint)
-		extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, endpoint, maxChars)
-		if dispatchErr != nil {
-			logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-			result := &extractor.ExtractedResult{
-				URL:                   url,
-				ProcessedSuccessfully: false,
-				Error:                 dispatchErr.Error(),
-			}
-			if checkIfErrorIsPermanent(dispatchErr) {
-				sh.Cache.Set(ctx, cacheKey, result, 5*time.Minute) // Short TTL for failures
-			}
-			results <- result
-		} else {
-			sh.Cache.Set(ctx, cacheKey, extractedData, sh.Config.ContentCacheTTL)
-			results <- extractedData
-		}
-	}
-}
 
