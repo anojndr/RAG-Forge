@@ -2,13 +2,15 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 
 	"github.com/go-redis/redis/v8"
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 // RedisCache is a Redis-backed cache that implements the Cache interface.
 type RedisCache struct {
