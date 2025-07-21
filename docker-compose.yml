@@ -16,12 +16,12 @@ services:
       - GOGC=50
       # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
       # For example, on an 8-thread machine, set BROWSER_POOL_SIZE=8 in your .env file.
-      - BROWSER_POOL_SIZE=4
+      - BROWSER_POOL_SIZE=6 # This should match the number of cores you give the app
     env_file:
       - .env
-    # This assigns the container to the first 4 CPU threads (0, 1, 2, 3)
+    # Pin the Go service to the first 6 CPU threads (0-5) to give it priority.
     # This is a Linux-only feature.
-    cpuset: "0-3"
+    cpuset: "0-5"
     depends_on:
       - transcript-service
     command: ["./main"]
@@ -30,10 +30,12 @@ services:
     build:
       context: ./transcript-service
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
     env_file:
       - .env
+    # Pin the Python service to the remaining 2 CPU threads (6-7).
+    # This prevents it from contending for CPU with the main Go application.
+    # The service is internal, so we don't need to expose the port.
+    cpuset: "6-7"
 
 networks:
   default:

@@ -86,13 +86,13 @@ func main() {
 
 	// === DUAL WORKER POOL INITIALIZATION ===
 	// A small pool for heavy, browser-based jobs
-	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*10) // Increased buffer
+	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*50) // Increased buffer
 	browserWorkerPool.Start()
 	defer browserWorkerPool.Stop()
 	slog.Info("Browser worker pool started", "size", appConfig.BrowserPoolSize)
 
 	// A large pool for light, HTTP-based jobs
-	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*10) // Increased buffer
+	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*50) // Increased buffer
 	httpWorkerPool.Start()
 	defer httpWorkerPool.Stop()
 	slog.Info("HTTP worker pool started", "size", appConfig.HTTPWorkerPoolSize)
