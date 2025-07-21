@@ -17,7 +17,9 @@ import (
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
+	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
+	"web-search-api-for-llms/internal/worker"
 )
 
 var gzipWriterPool = sync.Pool{
@@ -71,8 +73,16 @@ func main() {
 		appCache = cache.NewMemoryCache(10*time.Minute, 15*time.Minute)
 	}
 
-	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache)
+	// Create a single dispatcher instance
+	dispatcher := extractor.NewDispatcher(appConfig, browserPool, httpClient)
+
+	// Initialize and start the global worker pool
+	workerPool := worker.NewWorkerPool(dispatcher, appConfig.MaxConcurrentExtractions, 100)
+	workerPool.Start()
+	defer workerPool.Stop()
+
+	// Initialize handlers, passing the worker pool
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache, workerPool)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()

@@ -16,6 +16,7 @@ import (
 	"web-search-api-for-llms/internal/extractor"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/searxng"
+	"web-search-api-for-llms/internal/worker"
 )
 // RequestPayload defines the expected JSON structure for the /search endpoint.
 type RequestPayload struct {
@@ -89,23 +90,21 @@ func getTaskWeight(url, endpoint string) int {
 
 // SearchHandler holds dependencies for the search handler and manages HTTP request processing.
 type SearchHandler struct {
-	Config             *config.AppConfig
-	SearxNGClient      *searxng.Client
-	Dispatcher         *extractor.Dispatcher
-	Cache              cache.Cache
-	concurrencyLimiter chan struct{}
+	Config        *config.AppConfig
+	SearxNGClient *searxng.Client
+	Dispatcher    *extractor.Dispatcher
+	Cache         cache.Cache
+	WorkerPool    *worker.WorkerPool
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
-func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client, appCache cache.Cache) *SearchHandler {
-	// Total capacity, e.g., 20. Allows 20 fast tasks, or 4 browser tasks, or a mix.
-	totalWeightCapacity := 20
+func NewSearchHandler(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client, appCache cache.Cache, workerPool *worker.WorkerPool) *SearchHandler {
 	return &SearchHandler{
-		Config:             appConfig,
-		SearxNGClient:      searxng.NewClient(appConfig, client),
-		Dispatcher:         extractor.NewDispatcher(appConfig, browserPool, client),
-		Cache:              appCache,
-		concurrencyLimiter: make(chan struct{}, totalWeightCapacity),
+		Config:        appConfig,
+		SearxNGClient: searxng.NewClient(appConfig, client),
+		Dispatcher:    extractor.NewDispatcher(appConfig, browserPool, client),
+		Cache:         appCache,
+		WorkerPool:    workerPool,
 	}
 }
 
@@ -172,65 +171,40 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 
 	for _, targetURL := range urls {
+		// Check cache before dispatching job
+		cacheKey := getContentCacheKey(targetURL, reqPayload.MaxCharPerURL)
+		if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+			log.Printf("Content cache HIT for URL: %s", targetURL)
+			resultsChan <- cachedResult.(*extractor.ExtractedResult)
+			continue
+		}
+
 		wg.Add(1)
-		go func(url string) {
+		job := worker.Job{
+			URL:        targetURL,
+			Endpoint:   "/search",
+			MaxChars:   reqPayload.MaxCharPerURL,
+			ResultChan: make(chan *extractor.ExtractedResult, 1),
+			Context:    r.Context(),
+		}
+
+		sh.WorkerPool.JobQueue <- job
+
+		go func(job worker.Job) {
 			defer wg.Done()
-
-			taskWeight := getTaskWeight(url, "/search")
-
-			// Acquire 'n' slots from the semaphore
-			for i := 0; i < taskWeight; i++ {
-				sh.concurrencyLimiter <- struct{}{}
-			}
-
-			// Release the slots when done
-			defer func() {
-				for i := 0; i < taskWeight; i++ {
-					<-sh.concurrencyLimiter
-				}
-			}()
-
-			// Panic recovery to prevent a single URL from crashing the entire worker.
-			defer func() {
-				if rec := recover(); rec != nil {
-					logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 fmt.Sprintf("panic during processing: %v", rec),
-					}
-				}
-			}()
-
-			// Check cache before processing
-			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
-				log.Printf("Content cache HIT for URL: %s", url)
-				resultsChan <- cachedResult.(*extractor.ExtractedResult)
-				return
-			}
-
-			log.Printf("Processing: %s (endpoint: /search)", url)
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/search", reqPayload.MaxCharPerURL)
-			if dispatchErr != nil {
-				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-				result := &extractor.ExtractedResult{
-					URL:                   url,
-					ProcessedSuccessfully: false,
-					Error:                 dispatchErr.Error(),
-				}
-				if checkIfErrorIsPermanent(dispatchErr) {
+			result := <-job.ResultChan
+			if result.Error != "" {
+				if checkIfErrorIsPermanent(fmt.Errorf(result.Error)) {
 					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute) // Short TTL for failures
 				}
-				resultsChan <- result
 			} else {
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
-				resultsChan <- extractedData
+				sh.Cache.Set(r.Context(), cacheKey, result, sh.Config.ContentCacheTTL)
 			}
-		}(targetURL)
+			resultsChan <- result
+		}(job)
 	}
 
-	// Wait for all workers to finish and then close the results channel
+	// Wait for all jobs to be processed and then close the main results channel
 	go func() {
 		wg.Wait()
 		close(resultsChan)
@@ -300,65 +274,40 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 
 	for _, targetURL := range reqPayload.URLs {
+		// Check cache before dispatching job
+		cacheKey := getContentCacheKey(targetURL, reqPayload.MaxCharPerURL)
+		if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
+			log.Printf("Content cache HIT for URL: %s", targetURL)
+			resultsChan <- cachedResult.(*extractor.ExtractedResult)
+			continue
+		}
+
 		wg.Add(1)
-		go func(url string) {
+		job := worker.Job{
+			URL:        targetURL,
+			Endpoint:   "/extract",
+			MaxChars:   reqPayload.MaxCharPerURL,
+			ResultChan: make(chan *extractor.ExtractedResult, 1),
+			Context:    r.Context(),
+		}
+
+		sh.WorkerPool.JobQueue <- job
+
+		go func(job worker.Job) {
 			defer wg.Done()
-
-			taskWeight := getTaskWeight(url, "/extract")
-
-			// Acquire 'n' slots from the semaphore
-			for i := 0; i < taskWeight; i++ {
-				sh.concurrencyLimiter <- struct{}{}
-			}
-
-			// Release the slots when done
-			defer func() {
-				for i := 0; i < taskWeight; i++ {
-					<-sh.concurrencyLimiter
-				}
-			}()
-
-			// Panic recovery to prevent a single URL from crashing the entire worker.
-			defer func() {
-				if rec := recover(); rec != nil {
-					logger.LogError("Panic recovered in extraction worker for URL %s: %v", url, rec)
-					resultsChan <- &extractor.ExtractedResult{
-						URL:                   url,
-						ProcessedSuccessfully: false,
-						Error:                 fmt.Sprintf("panic during processing: %v", rec),
-					}
-				}
-			}()
-
-			// Check cache before processing
-			cacheKey := getContentCacheKey(url, reqPayload.MaxCharPerURL)
-			if cachedResult, found := sh.Cache.Get(r.Context(), cacheKey); found {
-				log.Printf("Content cache HIT for URL: %s", url)
-				resultsChan <- cachedResult.(*extractor.ExtractedResult)
-				return
-			}
-
-			log.Printf("Processing: %s (endpoint: /extract)", url)
-			extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, "/extract", reqPayload.MaxCharPerURL)
-			if dispatchErr != nil {
-				logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-				result := &extractor.ExtractedResult{
-					URL:                   url,
-					ProcessedSuccessfully: false,
-					Error:                 dispatchErr.Error(),
-				}
-				if checkIfErrorIsPermanent(dispatchErr) {
+			result := <-job.ResultChan
+			if result.Error != "" {
+				if checkIfErrorIsPermanent(fmt.Errorf(result.Error)) {
 					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute) // Short TTL for failures
 				}
-				resultsChan <- result
 			} else {
-				sh.Cache.Set(r.Context(), cacheKey, extractedData, sh.Config.ContentCacheTTL)
-				resultsChan <- extractedData
+				sh.Cache.Set(r.Context(), cacheKey, result, sh.Config.ContentCacheTTL)
 			}
-		}(targetURL)
+			resultsChan <- result
+		}(job)
 	}
 
-	// Wait for all workers to finish and then close the results channel
+	// Wait for all jobs to be processed and then close the main results channel
 	go func() {
 		wg.Wait()
 		close(resultsChan)
