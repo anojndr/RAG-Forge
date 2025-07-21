@@ -40,6 +40,7 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (
 		colly.UserAgent(useragent.RandomDesktop()),
 	)
 
+	c.SetClient(e.HTTPClient)
 	c.SetRequestTimeout(10 * time.Second)
 
 	var pageTitle string

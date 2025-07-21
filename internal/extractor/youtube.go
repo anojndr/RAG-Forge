@@ -29,7 +29,7 @@ type YouTubeExtractor struct {
 // NewYouTubeExtractor creates a new YouTubeExtractor.
 func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*YouTubeExtractor, error) {
 	ctx := context.Background()
-	ytService, err := youtube.NewService(ctx, option.WithAPIKey(appConfig.YouTubeAPIKey))
+	ytService, err := youtube.NewService(ctx, option.WithAPIKey(appConfig.YouTubeAPIKey), option.WithHTTPClient(client))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
 	}
