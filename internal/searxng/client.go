@@ -12,8 +12,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"crypto/tls"
-	"time"
 
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
@@ -59,36 +57,15 @@ type SerperSearchResponse struct {
 
 // Client is an API client for search engines.
 type Client struct {
-	config            *config.AppConfig
-	httpClient        *http.Client
-	searxngHTTPClient *http.Client
+	config     *config.AppConfig
+	httpClient *http.Client
 }
 
 // NewClient creates a new search client.
 func NewClient(appConfig *config.AppConfig, client *http.Client) *Client {
-	searxngClient := client
-	// If SearxNG is local, create a more optimized client for it.
-	if strings.Contains(appConfig.SearxNGURL, "localhost") || strings.Contains(appConfig.SearxNGURL, "127.0.0.1") {
-		transport := &http.Transport{
-			// Shorten timeouts for local connections
-			ResponseHeaderTimeout: 5 * time.Second,
-			IdleConnTimeout:       30 * time.Second,
-		}
-		// Disable TLS for plain HTTP local instances
-		if !strings.HasPrefix(appConfig.SearxNGURL, "https://") {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		}
-		searxngClient = &http.Client{
-			Transport: transport,
-			Timeout:   10 * time.Second, // Overall request timeout
-		}
-		log.Println("Using optimized HTTP client for local SearxNG instance.")
-	}
-
 	return &Client{
-		config:            appConfig,
-		httpClient:        client,
-		searxngHTTPClient: searxngClient,
+		config:     appConfig,
+		httpClient: client,
 	}
 }
 
@@ -229,7 +206,7 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 			}
 			req.Header.Set("User-Agent", useragent.Random())
 
-			resp, err := c.searxngHTTPClient.Do(req)
+			resp, err := c.httpClient.Do(req)
 			if err != nil {
 				logger.LogError("Error fetching from SearxNG page %d: %v.\n", pageNum, err)
 				resultsChan <- pageResult{page: pageNum, err: err}
