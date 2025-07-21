@@ -126,7 +126,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	}
 
 	// Create a timeout context for the entire extraction
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	// Check if we have Twitter credentials
@@ -310,7 +310,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 		log.Printf("TwitterExtractor: Loaded saved session cookies")
 		// Test if we're still logged in by navigating to the home page with a timeout
 		log.Printf("TwitterExtractor: Navigating to x.com/home to check session status")
-		err := page.Timeout(10 * time.Second).Navigate("https://x.com/home")
+		err := page.Timeout(5 * time.Second).Navigate("https://x.com/home")
 		if err != nil {
 			log.Printf("TwitterExtractor: Failed to navigate to home page to check session (%v), assuming session is expired and logging in.", err)
 			if loginErr := e.loginToTwitter(page); loginErr != nil {
@@ -387,7 +387,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 		return e.parseTweetDetailResponse(apiResponse)
 	case err := <-errChan:
 		return nil, err
-	case <-time.After(30 * time.Second):
+	case <-time.After(15 * time.Second):
 		return nil, fmt.Errorf("timed out waiting for TweetDetail API response")
 	}
 }

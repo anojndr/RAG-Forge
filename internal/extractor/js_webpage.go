@@ -37,7 +37,7 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		SourceType: "webpage_js",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	browser := e.BrowserPool.Get()
@@ -85,19 +85,9 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		title = info.Title
 	}
 
-	// Scroll to the bottom of the page to trigger lazy loading
-	lastHeight := int64(-1)
-	for {
-		height := page.MustEval("() => document.body.scrollHeight")
-		currentHeight := height.Int()
-		if int64(currentHeight) == lastHeight {
-			log.Printf("JSWebpageExtractor: Page height stabilized at %d for %s", currentHeight, url)
-			break // Stop if height is stable
-		}
-		lastHeight = int64(currentHeight)
-
-		page.MustEval("window.scrollTo(0, document.body.scrollHeight)")
-		page.MustWaitStable()
+	// Scroll to the bottom of the page to trigger lazy loading, waiting for stability
+	if err := page.Context(ctx).WaitStable(2 * time.Second); err != nil {
+		logger.LogError("JSWebpageExtractor: Error waiting for page to be stable after scrolling for %s: %v", url, err)
 	}
 
 	// Select all text using JavaScript
