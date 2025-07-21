@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +68,7 @@ type SearchHandler struct {
 	SearxNGClient   *searxng.Client
 	Cache           cache.Cache
 	HTTPWorkerPool    *worker.WorkerPool // For lightweight jobs
-	BrowserWorkerPool *worker.WorkerPool // For heavyweight jobs
+	BrowserWorkerPool *worker.WorkerPool // For heavyweight, CPU-bound jobs
 }
 
 // NewSearchHandler creates a new SearchHandler with its dependencies.
@@ -97,12 +98,19 @@ func (sh *SearchHandler) HandleExtract(w http.ResponseWriter, r *http.Request) {
 }
 
 // isBrowserJob determines if a URL requires the heavyweight browser worker pool.
-func isBrowserJob(url, endpoint string) bool {
+func isBrowserJob(urlString, endpoint string) bool {
+	// All /extract jobs use the browser for maximum compatibility.
 	if endpoint == "/extract" {
-		return true // All /extract jobs are considered heavy
+		return true
 	}
-	// For /search, only Twitter is heavy. Others use lightweight scrapers.
-	return strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com")
+	// For /search, only Twitter/X needs the browser. Others use lightweight scrapers.
+	// You can add more domains here if they prove to be JS-heavy.
+	parsedURL, err := url.Parse(urlString)
+	if err != nil {
+		slog.Warn("Could not parse URL in isBrowserJob", "url", urlString, "error", err)
+		return false // Default to non-browser job on parse failure
+	}
+	return strings.Contains(parsedURL.Host, "twitter.com") || strings.Contains(parsedURL.Host, "x.com")
 }
 
 func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, endpoint string) {
@@ -206,7 +214,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 			Context:    r.Context(),
 		}
 
-		// Choose the correct worker pool
+		// *** CORE LOGIC CHANGE: Choose the correct worker pool ***
 		if isBrowserJob(targetURL, endpoint) {
 			logger.Debug("Dispatching to BROWSER worker pool", "url", targetURL)
 			sh.BrowserWorkerPool.JobQueue <- job
@@ -215,7 +223,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 			sh.HTTPWorkerPool.JobQueue <- job
 		}
 
-		// Fan-in the results
+		// Fan-in the results (this part remains the same)
 		go func(job worker.Job) {
 			defer wg.Done()
 			result := <-job.ResultChan
@@ -242,6 +250,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		close(resultsChan)
 	}()
 
+	// --- Aggregate and respond ---
 	// --- Aggregate and respond ---
 	var finalResults []extractor.ExtractedResult
 	for res := range resultsChan {
@@ -278,7 +287,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
-// checkContentCache performs a batched cache lookup.
+// Replace the old checkContentCache with this more robust version.
 func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, maxChars *int) (
 	cachedResults []*extractor.ExtractedResult,
 	uncachedURLs []string,
@@ -295,19 +304,10 @@ func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, m
 		urlToCacheKey[u] = key
 	}
 
-	var foundMap map[string]*extractor.ExtractedResult
-	var err error
-
-	// Attempt batched fetch from either Redis or ShardedMemoryCache
-	if redisCache, isRedis := sh.Cache.(*cache.RedisCache); isRedis {
-		foundMap, err = redisCache.MGetExtractedResults(ctx, keysToCheck)
-	} else if shardedCache, isSharded := sh.Cache.(*cache.ShardedMemoryCache); isSharded { // ADD THIS
-		foundMap, err = shardedCache.MGetExtractedResults(ctx, keysToCheck) // USE THE NEW METHOD
-	}
-
-	if err != nil || foundMap == nil { // If batched failed or not supported
-		slog.Warn("Cache MGET failed or not supported, falling back to individual gets", "error", err)
-		return sh.checkContentCacheIndividually(ctx, urls, maxChars)
+	foundMap, err := sh.Cache.MGetExtractedResults(ctx, keysToCheck)
+	if err != nil {
+		slog.Warn("Cache MGET failed, falling back to individual gets", "error", err)
+		return sh.checkContentCacheIndividually(ctx, urls, maxChars) // Keep the old logic as a fallback
 	}
 
 	// Process batched results
@@ -317,6 +317,7 @@ func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, m
 		foundKeys[key] = true
 	}
 
+	// Determine which URLs were not in the cache
 	for _, u := range urls {
 		key := urlToCacheKey[u]
 		if !foundKeys[key] {

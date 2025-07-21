@@ -11,4 +11,6 @@ type Cache interface {
 	GetExtractedResult(ctx context.Context, key string) (*extractor.ExtractedResult, bool)
 	GetSearchURLs(ctx context.Context, key string) ([]string, bool)
 	Set(ctx context.Context, key string, value interface{}, duration time.Duration)
+	// Add this new method for batched lookups
+	MGetExtractedResults(ctx context.Context, keys []string) (map[string]*extractor.ExtractedResult, error)
 }

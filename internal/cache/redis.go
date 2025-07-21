@@ -45,16 +45,18 @@ func (c *RedisCache) GetExtractedResult(ctx context.Context, key string) (*extra
 	return &result, true
 }
 
-// GetSearchURLs retrieves a slice of URLs from the cache.
-// MGetExtractedResults retrieves multiple ExtractedResults from cache using MGET.
-// It returns a map of key to result for found items.
+// Add MGetExtractedResults to RedisCache
 func (c *RedisCache) MGetExtractedResults(ctx context.Context, keys []string) (map[string]*extractor.ExtractedResult, error) {
 	if len(keys) == 0 {
 		return make(map[string]*extractor.ExtractedResult), nil
 	}
-	results := make(map[string]*extractor.ExtractedResult)
+	results := make(map[string]*extractor.ExtractedResult, len(keys))
 	vals, err := c.client.MGet(ctx, keys...).Result()
 	if err != nil {
+		// Don't treat redis.Nil as a critical error for MGET
+		if err == redis.Nil {
+			return results, nil
+		}
 		return nil, fmt.Errorf("redis MGET failed: %w", err)
 	}
 
@@ -62,12 +64,15 @@ func (c *RedisCache) MGetExtractedResults(ctx context.Context, keys []string) (m
 		if val == nil {
 			continue // Key not found
 		}
-		if strVal, ok := val.(string); ok {
-			var result extractor.ExtractedResult
-			if err := json.Unmarshal([]byte(strVal), &result); err == nil {
-				results[keys[i]] = &result
+		if strVal, ok := val.(string); ok && strVal != "" {
+			// Use the pooled Get to avoid allocation inside the loop
+			pooledResult := extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
+			if err := json.Unmarshal([]byte(strVal), pooledResult); err == nil {
+				results[keys[i]] = pooledResult
 			} else {
 				slog.Warn("RedisCache: MGET failed to unmarshal ExtractedResult", "key", keys[i], "error", err)
+				// Put back in the pool if unmarshal fails
+				extractor.ExtractedResultPool.Put(pooledResult)
 			}
 		}
 	}

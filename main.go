@@ -54,19 +54,22 @@ func main() {
 
 	// Create a single, optimized HTTP client for all network requests
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second, // Keep this reasonable
+		Timeout: 30 * time.Second, // A global timeout is a good safety net
 		Transport: &http.Transport{
-			// Increase total idle connections significantly. This is the global pool size.
-			MaxIdleConns: 500,
-			// Increase per-host connections. Many requests will go to the same domains (google, youtube, reddit).
-			MaxIdleConnsPerHost: 100,
-			// Keep idle connections around for longer.
-			IdleConnTimeout: 120 * time.Second,
-			// Great choice, keep this.
-			ForceAttemptHTTP2: true,
-			// Add these for faster handshakes
-			TLSHandshakeTimeout:   10 * time.Second,
+			// This is the total number of idle connections across all hosts.
+			// With thousands of users, this should be high.
+			MaxIdleConns: 1000,
+			// This is the number of idle connections to a single host.
+			// Many requests will go to the same domains (google, youtube, reddit).
+			MaxIdleConnsPerHost: 200,
+			// How long to keep an idle connection alive.
+			IdleConnTimeout: 90 * time.Second,
+			// Timeout for the TLS handshake.
+			TLSHandshakeTimeout: 10 * time.Second,
+			// A good default.
 			ExpectContinueTimeout: 1 * time.Second,
+			// A great choice to have, keep this.
+			ForceAttemptHTTP2: true,
 		},
 	}
 
@@ -84,15 +87,14 @@ func main() {
 	// Create a single dispatcher instance
 	dispatcher := extractor.NewDispatcher(appConfig, browserPool, httpClient)
 
-	// === DUAL WORKER POOL INITIALIZATION ===
-	// A small pool for heavy, browser-based jobs
-	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*50) // Increased buffer
+	// A small pool for heavy, CPU-bound browser jobs. Size should match available cores.
+	browserWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.BrowserPoolSize, appConfig.BrowserPoolSize*2)
 	browserWorkerPool.Start()
 	defer browserWorkerPool.Stop()
 	slog.Info("Browser worker pool started", "size", appConfig.BrowserPoolSize)
 
-	// A large pool for light, HTTP-based jobs
-	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*50) // Increased buffer
+	// A large pool for light, I/O-bound HTTP jobs.
+	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*2)
 	httpWorkerPool.Start()
 	defer httpWorkerPool.Stop()
 	slog.Info("HTTP worker pool started", "size", appConfig.HTTPWorkerPoolSize)

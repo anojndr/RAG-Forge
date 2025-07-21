@@ -44,6 +44,7 @@ func (wp *WorkerPool) Start() {
 				if err != nil {
 					// Get a result from the pool instead of allocating
 					result = extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
+				                result.Reset() // Important: reset before use
 					result.URL = job.URL
 					result.ProcessedSuccessfully = false
 					result.Error = err.Error()

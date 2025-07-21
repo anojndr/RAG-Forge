@@ -15,12 +15,12 @@ services:
       # - Decrease to 30 if you have CPU to spare and want to minimize latency.
       - GOGC=50
       # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
-      # For example, on an 8-thread machine, set BROWSER_POOL_SIZE=8 in your .env file.
-      - BROWSER_POOL_SIZE=6 # This should match the number of cores you give the app
+      # For an 8-thread machine, where we assign 6 threads to this service, a value of 6 is ideal.
+      - BROWSER_POOL_SIZE=6
     env_file:
       - .env
-    # Pin the Go service to the first 6 CPU threads (0-5) to give it priority.
-    # This is a Linux-only feature.
+    # Pin the Go service to the first 6 CPU threads (0-5).
+    # This is a Linux-only feature and gives it dedicated resources.
     cpuset: "0-5"
     depends_on:
       - transcript-service

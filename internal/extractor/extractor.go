@@ -17,14 +17,14 @@ type ExtractedResult struct {
 	Error                 string      `json:"error,omitempty"`
 }
 
-// ExtractedResultPool is a pool for reusing ExtractedResult objects to reduce allocations.
+// Add a pool for the main result struct
 var ExtractedResultPool = sync.Pool{
 	New: func() interface{} {
 		return new(ExtractedResult)
 	},
 }
 
-// Reset clears the fields of the ExtractedResult so it can be safely reused.
+// Add a Reset method to clear the struct for reuse
 func (er *ExtractedResult) Reset() {
 	er.URL = ""
 	er.SourceType = ""
