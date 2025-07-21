@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/utils"
 )
+
+var gzipWriterPool = sync.Pool{
+	New: func() interface{} {
+		return gzip.NewWriter(nil)
+	},
+}
 
 func main() {
 	// Setup logging
@@ -168,12 +175,14 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
 
-		// Create gzip writer
-		gw := gzip.NewWriter(w)
+		// Get a gzip writer from the pool
+		gw := gzipWriterPool.Get().(*gzip.Writer)
+		gw.Reset(w)
 		defer func() {
 			if err := gw.Close(); err != nil {
 				logger.LogError("Error closing gzip writer: %v", err)
 			}
+			gzipWriterPool.Put(gw)
 		}()
 
 		// Wrap response writer
