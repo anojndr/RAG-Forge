@@ -7,9 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 
-	"github.com/dslipak/pdf"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/useragent"
@@ -76,7 +76,7 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*Ext
 	}
 
 	// 2. Process the response body as a stream
-	textContent, err := e.extractTextFromPDF(resp.Body, resp.ContentLength)
+	textContent, err := e.extractTextFromPDF(resp.Body)
 	if err != nil {
 		// Check if the error is due to non-PDF content
 		if err == ErrNotPDF {
@@ -104,54 +104,40 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*Ext
 	return result, nil
 }
 
-// extractTextFromPDF extracts text from PDF content.
-func (e *PDFExtractor) extractTextFromPDF(reader io.Reader, contentLength int64) (string, error) {
-	// The pdf library requires an io.ReaderAt, so we have to buffer the whole thing in memory.
-	// This is not ideal, but it's a limitation of the library.
-	// We will at least check the content type first to avoid buffering non-PDF files.
-	buf := new(bytes.Buffer)
-	teeReader := io.TeeReader(reader, buf)
-
-	// Read a small chunk to detect content type
+// extractTextFromPDF extracts text from PDF content using the pdftotext CLI tool.
+func (e *PDFExtractor) extractTextFromPDF(reader io.Reader) (string, error) {
+	// First, check the file type to ensure we're dealing with a PDF.
 	header := make([]byte, 512)
-	n, err := io.ReadFull(teeReader, header)
+	n, err := io.ReadFull(reader, header)
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		return "", fmt.Errorf("failed to read header: %w", err)
 	}
-	header = header[:n]
 
-	fileType := e.detectFileType(header)
-	if fileType != "pdf" {
+	// Combine the header with the rest of the reader for the CLI tool.
+	combinedReader := io.MultiReader(bytes.NewReader(header[:n]), reader)
+
+	if e.detectFileType(header[:n]) != "pdf" {
 		return "", ErrNotPDF
 	}
 
-	// The rest of the stream is now in buf, continue reading the original reader
-	remainingReader := io.MultiReader(buf, reader)
+	return e.extractTextFromPDFCLI(combinedReader)
+}
 
-	// We still need to read the whole thing for the pdf library
-	pdfBytes, err := io.ReadAll(remainingReader)
-	if err != nil {
-		return "", fmt.Errorf("failed to read full PDF body: %w", err)
+// extractTextFromPDFCLI calls the `pdftotext` command-line tool.
+func (e *PDFExtractor) extractTextFromPDFCLI(reader io.Reader) (string, error) {
+	cmd := exec.Command("pdftotext", "-", "-") // Read from stdin, write to stdout
+	cmd.Stdin = reader
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("pdftotext failed: %s, err: %w", stderr.String(), err)
 	}
 
-	r := bytes.NewReader(pdfBytes)
-	pdfReader, err := pdf.NewReader(r, int64(len(pdfBytes)))
-	if err != nil {
-		return "", fmt.Errorf("failed to create PDF reader: %w", err)
-	}
-
-	var textBuf bytes.Buffer
-	b, err := pdfReader.GetPlainText()
-	if err != nil {
-		return "", fmt.Errorf("failed to get plain text from PDF: %w", err)
-	}
-
-	_, err = textBuf.ReadFrom(b)
-	if err != nil {
-		return "", fmt.Errorf("failed to read text from buffer: %w", err)
-	}
-
-	return textBuf.String(), nil
+	return out.String(), nil
 }
 
 // detectFileType examines file header to determine actual file type
