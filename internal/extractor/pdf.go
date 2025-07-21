@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -29,7 +29,7 @@ func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtra
 
 // Extract downloads a PDF from a URL and extracts its text content using a native Go library.
 func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("PDFExtractor: Starting extraction for URL: %s", url)
+	slog.Info("PDFExtractor: Starting extraction", "url", url)
 	result := &ExtractedResult{
 		URL:        url,
 		SourceType: "pdf",
@@ -92,10 +92,10 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*Ext
 	// 3. Truncate content if necessary
 	if maxChars != nil && len(textContent) > *maxChars {
 		textContent = textContent[:*maxChars]
-		log.Printf("PDFExtractor: Truncated content to %d characters for %s", *maxChars, url)
+		slog.Info("PDFExtractor: Truncated content", "chars", *maxChars, "url", url)
 	}
 
-	log.Printf("PDFExtractor: Successfully extracted %d characters from %s", len(textContent), url)
+	slog.Info("PDFExtractor: Successfully extracted content", "chars", len(textContent), "url", url)
 
 	result.ProcessedSuccessfully = true
 	result.Data = PDFData{

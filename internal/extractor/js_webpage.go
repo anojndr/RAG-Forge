@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/go-rod/rod/lib/proto"
@@ -31,7 +31,7 @@ func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Poo
 
 // Extract uses a headless browser (chromedp) to get the visible text from a URL.
 func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("JSWebpageExtractor: Starting extraction for URL: %s", url)
+	slog.Info("JSWebpageExtractor: Starting extraction", "url", url)
 	result := &ExtractedResult{
 		URL:        url,
 		SourceType: "webpage_js",
@@ -54,25 +54,22 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 	router := page.HijackRequests()
 	defer router.Stop()
 
-	// Block common ad and tracker domains
-	router.MustAdd("*.google-analytics.com/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+	// Block more resource types for faster text-only extraction
+	router.MustAdd("*", func(ctx *rod.Hijack) {
+		switch ctx.Request.Type() {
+		// Allow navigation and fetching documents/scripts
+		case proto.NetworkResourceTypeDocument,
+			 proto.NetworkResourceTypeScript,
+			 proto.NetworkResourceTypeXHR,
+			 proto.NetworkResourceTypeFetch:
+			ctx.ContinueRequest(&proto.FetchContinueRequest{})
+		// Block everything else
+		default:
+			ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+		}
 	})
-	router.MustAdd("*.googlesyndication.com/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-	})
-	router.MustAdd("*.doubleclick.net/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-	})
-	router.MustAdd("*.disqus.com/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-	})
-	router.MustAdd("*.facebook.net/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-	})
-	router.MustAdd("*.twitter.com/widgets/*", func(ctx *rod.Hijack) {
-		ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-	})
+	// Your existing blocks for trackers can be kept or removed, as the above is more aggressive.
+	// router.MustAdd("*.google-analytics.com/*", ...
 
 	go router.Run()
 
@@ -86,7 +83,7 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 
 	// Event handler for redirects
 	go page.EachEvent(func(e *proto.PageFrameNavigated) {
-		log.Printf("JSWebpageExtractor: Page navigated to %s (redirect)", e.Frame.URL)
+		slog.Debug("JSWebpageExtractor: Page navigated (redirect)", "url", e.Frame.URL)
 	})()
 
 	if err := page.Context(ctx).Navigate(url); err != nil {
@@ -138,7 +135,7 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 	textContent = text.Value.Str()
 
 	if len(strings.TrimSpace(textContent)) == 0 {
-		log.Printf("JSWebpageExtractor: No text content found after selection for %s. Falling back to innerText.", url)
+		slog.Debug("JSWebpageExtractor: No text content from selection, falling back to innerText", "url", url)
 		eval, err := page.Context(ctx).Eval(`() => document.body.innerText`)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to evaluate javascript on %s: %v", url, err)
@@ -149,7 +146,7 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		textContent = eval.Value.Str()
 	}
 
-	log.Printf("JSWebpageExtractor: Finished scraping %s. Title: '%s', Text length: %d", url, title, len(textContent))
+	slog.Info("JSWebpageExtractor: Finished scraping", "url", url, "title", title, "text_length", len(textContent))
 
 	result.ProcessedSuccessfully = true
 	result.Data = WebpageData{

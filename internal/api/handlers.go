@@ -170,7 +170,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	resultsChan := make(chan *extractor.ExtractedResult, len(urls))
 	var wg sync.WaitGroup
 	
-	cachedResults, uncachedURLs, _ := sh.checkContentCache(r.Context(), urls, maxChars)
+	cachedResults, uncachedURLs := sh.checkContentCache(r.Context(), urls, maxChars)
 	slog.Info("Content cache summary", "total", len(urls), "hits", len(cachedResults), "misses", len(uncachedURLs))
 
 	for _, cachedResult := range cachedResults {
@@ -255,48 +255,52 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 func (sh *SearchHandler) checkContentCache(ctx context.Context, urls []string, maxChars *int) (
 	cachedResults []*extractor.ExtractedResult,
 	uncachedURLs []string,
-	cacheKeys map[string]string) {
+) {
+    if len(urls) == 0 {
+        return nil, nil
+    }
 
-	cacheKeys = make(map[string]string)
 	keysToCheck := make([]string, len(urls))
+	urlToCacheKey := make(map[string]string, len(urls))
 	for i, u := range urls {
 		key := getContentCacheKey(u, maxChars)
-		cacheKeys[u] = key
 		keysToCheck[i] = key
+		urlToCacheKey[u] = key
 	}
 
-	redisCache, isRedis := sh.Cache.(*cache.RedisCache)
-	if isRedis {
+	// Attempt batched fetch if using Redis
+	if redisCache, isRedis := sh.Cache.(*cache.RedisCache); isRedis {
 		foundMap, err := redisCache.MGetExtractedResults(ctx, keysToCheck)
 		if err != nil {
 			slog.Warn("Redis MGET failed, falling back to individual gets", "error", err)
 			// Fallback to individual gets if MGET fails
 			return sh.checkContentCacheIndividually(ctx, urls, maxChars)
 		}
-		
+
 		foundKeys := make(map[string]bool)
 		for key, result := range foundMap {
 			cachedResults = append(cachedResults, result)
 			foundKeys[key] = true
 		}
-		
-		for u, key := range cacheKeys {
+
+		for _, u := range urls {
+			key := urlToCacheKey[u]
 			if !foundKeys[key] {
 				uncachedURLs = append(uncachedURLs, u)
 			}
 		}
-		return cachedResults, uncachedURLs, cacheKeys
+		return cachedResults, uncachedURLs
 	}
 
-	// Fallback for in-memory cache
+	// Fallback for in-memory cache or other cache types
 	return sh.checkContentCacheIndividually(ctx, urls, maxChars)
 }
 
+// checkContentCacheIndividually is the fallback for non-redis or failed MGET
 func (sh *SearchHandler) checkContentCacheIndividually(ctx context.Context, urls []string, maxChars *int) (
 	cachedResults []*extractor.ExtractedResult,
 	uncachedURLs []string,
-	_ map[string]string) {
-	
+) {
 	for _, u := range urls {
 		key := getContentCacheKey(u, maxChars)
 		if cachedResult, found := sh.Cache.GetExtractedResult(ctx, key); found {
@@ -305,7 +309,7 @@ func (sh *SearchHandler) checkContentCacheIndividually(ctx context.Context, urls
 			uncachedURLs = append(uncachedURLs, u)
 		}
 	}
-	return cachedResults, uncachedURLs, nil
+	return cachedResults, uncachedURLs
 }
 
 func (sh *SearchHandler) respondWithError(w http.ResponseWriter, code int, message string) {
@@ -331,5 +335,3 @@ func checkIfErrorIsPermanent(err error) bool {
 		strings.Contains(errStr, "failed to get tweet") || strings.Contains(errStr, "video unavailable") ||
 		strings.Contains(errStr, "no such host")
 }
-
-

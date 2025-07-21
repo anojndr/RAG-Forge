@@ -3,7 +3,7 @@ package extractor
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -118,7 +118,7 @@ func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool,
 // Extract fetches Twitter/X post content and comments
 
 func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("TwitterExtractor: Starting extraction for URL: %s", targetURL)
+	slog.Info("TwitterExtractor: Starting extraction", "url", targetURL)
 
 	result := &ExtractedResult{
 		URL:        targetURL,
@@ -132,7 +132,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	// Check if we have Twitter credentials
 	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
 		result.Error = "Twitter credentials not configured"
-		log.Printf("TwitterExtractor: Missing Twitter credentials for %s", targetURL)
+		slog.Warn("TwitterExtractor: Missing Twitter credentials", "url", targetURL)
 		return result, fmt.Errorf(result.Error)
 	}
 
@@ -141,7 +141,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 		if endpoint != "/extract" {
 			err := fmt.Errorf("twitter profile URL extraction is only available on the /extract endpoint")
 			result.Error = err.Error()
-			log.Printf("TwitterExtractor: Attempted to extract profile from non-/extract endpoint for %s", targetURL)
+			slog.Warn("TwitterExtractor: Attempted to extract profile from non-/extract endpoint", "url", targetURL)
 			return result, err
 		}
 		return e.extractFromProfileURL(ctx, targetURL, maxChars)
@@ -151,17 +151,17 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	tweetID := extractTweetID(targetURL)
 	if tweetID == "" {
 		result.Error = "could not extract tweet ID from URL"
-		log.Printf("TwitterExtractor: Error for %s: %s", targetURL, result.Error)
+		slog.Error("TwitterExtractor: Could not extract tweet ID from URL", "url", targetURL)
 		return result, fmt.Errorf(result.Error)
 	}
 
-	log.Printf("TwitterExtractor: Extracted Tweet ID: %s for URL: %s", tweetID, targetURL)
+	slog.Debug("TwitterExtractor: Extracted Tweet ID", "tweet_id", tweetID, "url", targetURL)
 
 	// Extract tweet data using browser automation with context
 	tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, targetURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("extraction failed: %v", err)
-		log.Printf("TwitterExtractor: Error extracting data for %s: %v", targetURL, err)
+		slog.Error("TwitterExtractor: Error extracting data", "url", targetURL, "error", err)
 		return result, err
 	}
 
@@ -195,12 +195,9 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 		}
 	}
 
-	log.Printf("TwitterExtractor: Successfully extracted tweet data for %s", targetURL)
+	slog.Info("TwitterExtractor: Successfully extracted tweet data", "url", targetURL)
 	return result, nil
 }
-
-// Compile regex once for tweet ID validation
-var tweetIDRegex = regexp.MustCompile(`^\d+$`)
 
 // extractTweetID extracts the tweet ID from various Twitter/X URL formats
 func extractTweetID(tweetURL string) string {
@@ -238,6 +235,7 @@ func extractTweetID(tweetURL string) string {
 				tweetID = tweetID[:idx]
 			}
 			// Validate tweet ID (should be numeric)
+			var tweetIDRegex = regexp.MustCompile(`^\d+$`)
 			if tweetIDRegex.MatchString(tweetID) {
 				return tweetID
 			}
@@ -307,41 +305,41 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	// Try to load saved cookies
 	cookiesFile := "twitter_cookies.json"
 	if e.loadCookies(page, cookiesFile) {
-		log.Printf("TwitterExtractor: Loaded saved session cookies")
+		slog.Info("TwitterExtractor: Loaded saved session cookies")
 		// Test if we're still logged in by navigating to the home page with a timeout
-		log.Printf("TwitterExtractor: Navigating to x.com/home to check session status")
+		slog.Debug("TwitterExtractor: Navigating to x.com/home to check session status")
 		err := page.Timeout(5 * time.Second).Navigate("https://x.com/home")
 		if err != nil {
-			log.Printf("TwitterExtractor: Failed to navigate to home page to check session (%v), assuming session is expired and logging in.", err)
+			slog.Warn("TwitterExtractor: Failed to navigate to home page to check session, assuming session is expired and logging in.", "error", err)
 			if loginErr := e.loginToTwitter(page); loginErr != nil {
 				return nil, fmt.Errorf("login failed: %w", loginErr)
 			}
 			if saveErr := e.saveCookies(page, cookiesFile); saveErr != nil {
-				log.Printf("TwitterExtractor: Failed to save cookies: %v", saveErr)
+				slog.Warn("TwitterExtractor: Failed to save cookies", "error", saveErr)
 			}
 		} else {
 			page.MustWaitNavigation()
 
 			currentURL := page.MustInfo().URL
 			if strings.Contains(currentURL, "/home") {
-				log.Printf("TwitterExtractor: Session is still valid, skipping login")
+				slog.Info("TwitterExtractor: Session is still valid, skipping login")
 			} else {
-				log.Printf("TwitterExtractor: Session expired, logging in")
+				slog.Info("TwitterExtractor: Session expired, logging in")
 				if loginErr := e.loginToTwitter(page); loginErr != nil {
 					return nil, fmt.Errorf("login failed: %w", loginErr)
 				}
 				if saveErr := e.saveCookies(page, cookiesFile); saveErr != nil {
-					log.Printf("TwitterExtractor: Failed to save cookies: %v", saveErr)
+					slog.Warn("TwitterExtractor: Failed to save cookies", "error", saveErr)
 				}
 			}
 		}
 	} else {
-		log.Printf("TwitterExtractor: No saved session found, logging in")
+		slog.Info("TwitterExtractor: No saved session found, logging in")
 		if err := e.loginToTwitter(page); err != nil {
 			return nil, fmt.Errorf("login failed: %w", err)
 		}
 		if err := e.saveCookies(page, cookiesFile); err != nil {
-			log.Printf("TwitterExtractor: Failed to save cookies: %v", err)
+			slog.Warn("TwitterExtractor: Failed to save cookies", "error", err)
 		}
 	}
 
@@ -353,7 +351,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	router := page.HijackRequests()
 	defer func() {
 		if err := router.Stop(); err != nil {
-			log.Printf("TwitterExtractor: Error stopping router: %v", err)
+			slog.Warn("TwitterExtractor: Error stopping router", "error", err)
 		}
 	}()
 
@@ -376,7 +374,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	go router.Run()
 
 	// Navigate to the tweet
-	log.Printf("TwitterExtractor: Navigating to tweet: %s", tweetURL)
+	slog.Debug("TwitterExtractor: Navigating to tweet", "url", tweetURL)
 	if err := page.Navigate(tweetURL); err != nil {
 		return nil, fmt.Errorf("failed to navigate to tweet: %w", err)
 	}
@@ -384,7 +382,7 @@ func (e *TwitterExtractor) extractTweetDataWithContext(ctx context.Context, twee
 	// Wait for the API response or timeout
 	select {
 	case apiResponse := <-apiResponseChan:
-		log.Printf("TwitterExtractor: Successfully captured TweetDetail API response")
+		slog.Info("TwitterExtractor: Successfully captured TweetDetail API response")
 		return e.parseTweetDetailResponse(apiResponse)
 	case err := <-errChan:
 		return nil, err
@@ -404,7 +402,7 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 	usernameField.MustSelectAllText().MustInput(e.Config.TwitterUsername)
 
 	// Click Next button
-	log.Printf("TwitterExtractor: Clicking Next button")
+	slog.Debug("TwitterExtractor: Clicking Next button")
 	clickResult := page.MustEval(`
 		() => {
 			const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
@@ -424,12 +422,12 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 	page.MustElement(`input[name="password"]`).MustWaitVisible()
 
 	// Enter password
-	log.Printf("TwitterExtractor: Entering password")
+	slog.Debug("TwitterExtractor: Entering password")
 	passwordField := page.MustElement(`input[name="password"]`)
 	passwordField.MustSelectAllText().MustInput(e.Config.TwitterPassword)
 
 	// Click Log in button
-	log.Printf("TwitterExtractor: Clicking Log in button")
+	slog.Debug("TwitterExtractor: Clicking Log in button")
 	loginResult := page.MustEval(`
 		() => {
 			const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
@@ -450,7 +448,7 @@ func (e *TwitterExtractor) loginToTwitter(page *rod.Page) error {
 
 	// Check if login was successful
 	currentURL := page.MustInfo().URL
-	log.Printf("TwitterExtractor: Login successful, current URL: %s", currentURL)
+	slog.Info("TwitterExtractor: Login successful", "url", currentURL)
 
 	if strings.Contains(currentURL, "/home") || strings.Contains(currentURL, "/i/status") {
 		return nil
@@ -537,7 +535,7 @@ func (e *TwitterExtractor) saveCookies(page *rod.Page, filename string) error {
 		return fmt.Errorf("failed to save cookies: %w", err)
 	}
 
-	log.Printf("TwitterExtractor: Session cookies saved to %s", filename)
+	slog.Info("TwitterExtractor: Session cookies saved", "filename", filename)
 	return nil
 }
 
@@ -552,7 +550,7 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		log.Printf("TwitterExtractor: Could not read cookies file: %v", err)
+		slog.Warn("TwitterExtractor: Could not read cookies file", "error", err)
 		return false
 	}
 
@@ -561,7 +559,7 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 	var cookieData []map[string]interface{}
 	err = json.Unmarshal(data, &cookieData)
 	if err != nil {
-		log.Printf("TwitterExtractor: Could not parse cookies: %v", err)
+		slog.Warn("TwitterExtractor: Could not parse cookies", "error", err)
 		return false
 	}
 
@@ -590,7 +588,7 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 	tweetURLs, err := e.extractTweetURLsFromProfile(ctx, profileURL)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to extract tweet URLs from profile: %v", err)
-		log.Printf("TwitterExtractor: Error for %s: %s", profileURL, result.Error)
+		slog.Error("TwitterExtractor: Failed to extract tweet URLs from profile", "url", profileURL, "error", err)
 		return result, err
 	}
 
@@ -603,13 +601,13 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 			defer wg.Done()
 			tweetID := extractTweetID(tURL)
 			if tweetID == "" {
-				log.Printf("TwitterExtractor: Could not extract tweet ID from %s", tURL)
+				slog.Warn("TwitterExtractor: Could not extract tweet ID", "url", tURL)
 				return
 			}
 
 			tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, tURL)
 			if err != nil {
-				log.Printf("TwitterExtractor: Failed to extract data for tweet %s: %v", tURL, err)
+				slog.Error("TwitterExtractor: Failed to extract data for tweet", "url", tURL, "error", err)
 				return
 			}
 			tweetExtracts <- TweetExtract{URL: tURL, Data: tweetData}
@@ -631,7 +629,7 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 	result.Data = profileResult
 	result.ProcessedSuccessfully = true
 
-	log.Printf("TwitterExtractor: Successfully extracted latest tweets from profile %s", profileURL)
+	slog.Info("TwitterExtractor: Successfully extracted latest tweets from profile", "url", profileURL)
 	return result, nil
 }
 

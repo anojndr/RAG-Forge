@@ -50,7 +50,7 @@ func main() {
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        200, // Increased for high concurrency
-			MaxIdleConnsPerHost: 20,  // Increased for high concurrency
+			MaxIdleConnsPerHost: 50,  // Increased from 20 to 50
 			IdleConnTimeout:     90 * time.Second,
 			ForceAttemptHTTP2:   true,
 		},
@@ -78,10 +78,10 @@ func main() {
 	slog.Info("Browser worker pool started", "size", appConfig.BrowserPoolSize)
 
 	// A large pool for light, HTTP-based jobs
-	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.MaxConcurrentExtractions, 200)
+	httpWorkerPool := worker.NewWorkerPool(dispatcher, appConfig.HTTPWorkerPoolSize, appConfig.HTTPWorkerPoolSize*2)
 	httpWorkerPool.Start()
 	defer httpWorkerPool.Stop()
-	slog.Info("HTTP worker pool started", "size", appConfig.MaxConcurrentExtractions)
+	slog.Info("HTTP worker pool started", "size", appConfig.HTTPWorkerPoolSize)
 
 	// Initialize handlers, passing the worker pools
 	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache, httpWorkerPool, browserWorkerPool)

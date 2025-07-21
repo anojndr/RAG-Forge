@@ -39,9 +39,9 @@ type AppConfig struct {
 	RedisDB        int
 	SearchCacheTTL time.Duration
 	ContentCacheTTL time.Duration
-	MaxConcurrentExtractions int
+	HTTPWorkerPoolSize       int // ADD THIS
 	BrowserPoolSize          int
-	JSExtractionTimeout  time.Duration
+	JSExtractionTimeout      time.Duration
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -79,9 +79,11 @@ func LoadConfig() (*AppConfig, error) {
 		RedisDB:       getEnvAsInt("REDIS_DB", 0),
 		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
-		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", getEnvAsInt("BROWSER_POOL_SIZE", 5)*2),
-		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 5),
-		JSExtractionTimeout:  getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
+		// Set a much higher default for the I/O-bound worker pool.
+		HTTPWorkerPoolSize:       getEnvAsInt("HTTP_WORKER_POOL_SIZE", 200),
+		// The browser pool should be closer to the number of CPU cores.
+		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 4), // Default to your number of cores
+		JSExtractionTimeout:      getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -131,8 +133,8 @@ func (c *AppConfig) Validate() error {
 		fmt.Println("Warning: Incomplete Webshare proxy credentials - proxy will not be used")
 	}
 
-	if c.MaxConcurrentExtractions <= 0 {
-		return fmt.Errorf("invalid value for MAX_CONCURRENT_EXTRACTIONS: %d (must be greater than 0)", c.MaxConcurrentExtractions)
+	if c.HTTPWorkerPoolSize <= 0 {
+		return fmt.Errorf("invalid value for HTTP_WORKER_POOL_SIZE: %d (must be greater than 0)", c.HTTPWorkerPoolSize)
 	}
 
 	if c.BrowserPoolSize <= 0 {

@@ -3,7 +3,7 @@ package extractor
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -132,7 +132,7 @@ func (e *RedditExtractor) getAccessToken() error {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("RedditExtractor: Warning - failed to close response body: %v", err)
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
 		}
 	}()
 
@@ -148,7 +148,7 @@ func (e *RedditExtractor) getAccessToken() error {
 	e.accessToken = tokenResp.AccessToken
 	e.tokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn-60) * time.Second) // Refresh 1 minute early
 
-	log.Printf("RedditExtractor: Successfully obtained access token")
+	slog.Info("RedditExtractor: Successfully obtained access token")
 	return nil
 }
 
@@ -258,7 +258,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("RedditExtractor: Warning - failed to close response body: %v", err)
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
 		}
 	}()
 
@@ -385,7 +385,7 @@ func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse)
 	for _, child := range commentsResp.Data.Children {
 		var comment RedditComment
 		if err := json.Unmarshal(child.Data, &comment); err != nil {
-			log.Printf("RedditExtractor: Failed to unmarshal comment: %v", err)
+			slog.Warn("RedditExtractor: Failed to unmarshal comment", "error", err)
 			continue
 		}
 
@@ -407,12 +407,12 @@ func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse)
 
 		// Limit to 50 comments for performance
 		if len(comments) >= 50 {
-			log.Printf("RedditExtractor: Reached comment limit of 50, stopping extraction")
+			slog.Debug("RedditExtractor: Reached comment limit of 50, stopping extraction")
 			break
 		}
 	}
 
-	log.Printf("RedditExtractor: Extracted %d comments", len(comments))
+	slog.Debug("RedditExtractor: Extracted comments", "count", len(comments))
 	return comments
 }
 
@@ -438,7 +438,7 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("RedditExtractor: Warning - failed to close response body: %v", err)
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
 		}
 	}()
 
@@ -503,7 +503,7 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("RedditExtractor: Warning - failed to close response body: %v", err)
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
 		}
 	}()
 
@@ -571,7 +571,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("RedditExtractor: Warning - failed to close response body: %v", err)
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
 		}
 	}()
 
@@ -645,7 +645,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 
 // Extract attempts to fetch Reddit data using API first, then falls back to JSON method
 func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("RedditExtractor: Starting extraction for URL: %s", redditURL)
+	slog.Info("RedditExtractor: Starting extraction", "url", redditURL)
 
 	result := &ExtractedResult{
 		URL:        redditURL,
@@ -660,7 +660,7 @@ func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *i
 		return result, fmt.Errorf(result.Error)
 	}
 
-	log.Printf("RedditExtractor: URL type: %d for %s", urlInfo.Type, redditURL)
+	slog.Debug("RedditExtractor: Parsed URL type", "type", urlInfo.Type, "url", redditURL)
 
 	// Handle different URL types
 	switch urlInfo.Type {
@@ -670,12 +670,12 @@ func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *i
 
 	case RedditSubredditURL:
 		// Handle subreddit feeds
-		log.Printf("RedditExtractor: Extracting subreddit posts for r/%s", urlInfo.Subreddit)
+		slog.Debug("RedditExtractor: Extracting subreddit posts", "subreddit", urlInfo.Subreddit)
 		return e.fetchSubredditPosts(urlInfo.Subreddit)
 
 	case RedditUserURL:
 		// Handle user profiles
-		log.Printf("RedditExtractor: Extracting user posts for u/%s", urlInfo.Username)
+		slog.Debug("RedditExtractor: Extracting user posts", "user", urlInfo.Username)
 		return e.fetchUserPosts(urlInfo.Username)
 
 	case RedditSearchURL:
@@ -700,10 +700,10 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 
 	// First, try using the Reddit API
 	if e.Config.RedditClientID != "" && e.Config.RedditClientSecret != "" {
-		log.Printf("RedditExtractor: Attempting to use Reddit API for %s", redditURL)
+		slog.Debug("RedditExtractor: Attempting to use Reddit API", "url", redditURL)
 		apiResult, err := e.fetchViaAPI(urlInfo.Subreddit, urlInfo.PostID)
 		if err == nil {
-			log.Printf("RedditExtractor: Successfully extracted data via API for %s", redditURL)
+			slog.Info("RedditExtractor: Successfully extracted data via API", "url", redditURL)
 			if maxChars != nil {
 				if data, ok := apiResult.Data.(RedditData); ok {
 					if len(data.PostBody) > *maxChars {
@@ -716,11 +716,11 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 		}
 		logger.LogError("RedditExtractor: API method failed for %s: %v. Falling back to JSON method", redditURL, err)
 	} else {
-		log.Printf("RedditExtractor: Reddit API credentials not configured. Using JSON fallback for %s", redditURL)
+		slog.Info("RedditExtractor: Reddit API credentials not configured, using JSON fallback", "url", redditURL)
 	}
 
 	// Fallback to JSON method
-	log.Printf("RedditExtractor: Attempting to use JSON method for %s", redditURL)
+	slog.Debug("RedditExtractor: Attempting to use JSON method", "url", redditURL)
 	jsonResult, err := e.fetchViaJSON(redditURL, maxChars)
 	if err != nil {
 		result.Error = fmt.Sprintf("both API and JSON methods failed: %v", err)
@@ -728,7 +728,7 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 		return result, fmt.Errorf(result.Error)
 	}
 
-	log.Printf("RedditExtractor: Successfully extracted data via JSON method for %s", redditURL)
+	slog.Info("RedditExtractor: Successfully extracted data via JSON method", "url", redditURL)
 	return jsonResult, nil
 }
 

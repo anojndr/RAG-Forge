@@ -3,7 +3,7 @@ package worker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"web-search-api-for-llms/internal/extractor"
 )
 
@@ -37,9 +37,9 @@ func NewWorkerPool(dispatcher *extractor.Dispatcher, poolSize int, queueSize int
 func (wp *WorkerPool) Start() {
 	for i := 0; i < wp.PoolSize; i++ {
 		go func(workerID int) {
-			log.Printf("Worker %d started", workerID)
+			slog.Debug("Worker started", "worker_id", workerID)
 			for job := range wp.JobQueue {
-				log.Printf("Worker %d processing job for URL: %s", workerID, job.URL)
+				slog.Debug("Worker processing job", "worker_id", workerID, "url", job.URL)
 				result, err := wp.Dispatcher.DispatchAndExtractWithContext(job.URL, job.Endpoint, job.MaxChars)
 				if err != nil {
 					result = &extractor.ExtractedResult{
@@ -50,13 +50,13 @@ func (wp *WorkerPool) Start() {
 				}
 				job.ResultChan <- result
 			}
-			log.Printf("Worker %d stopped", workerID)
+			slog.Debug("Worker stopped", "worker_id", workerID)
 		}(i)
 	}
 }
 
 // Stop gracefully shuts down the worker pool.
 func (wp *WorkerPool) Stop() {
-	log.Println("Stopping worker pool...")
+	slog.Info("Stopping worker pool...")
 	close(wp.JobQueue)
 }

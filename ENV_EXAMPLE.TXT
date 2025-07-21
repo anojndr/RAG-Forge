@@ -97,3 +97,14 @@ REDIS_DB=0
 # Cache expiration settings (e.g., 10m, 1h, 30s)
 SEARCH_CACHE_TTL=10m
 CONTENT_CACHE_TTL=1h
+
+# =============================================================================
+# PERFORMANCE TUNING
+# =============================================================================
+# Number of concurrent I/O-bound workers (for light scraping like webpages, reddit, youtube api)
+# This can be high as they are mostly waiting for network.
+HTTP_WORKER_POOL_SIZE=200
+
+# Number of concurrent CPU-bound workers (for JS rendering, Twitter/X)
+# Should be close to the number of CPU cores. For 4 cores / 8 threads, 4-8 is a good range.
+BROWSER_POOL_SIZE=4

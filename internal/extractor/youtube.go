@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -42,7 +42,7 @@ func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*You
 
 // Extract determines if the URL is a video or playlist and calls the appropriate handler.
 func (e *YouTubeExtractor) Extract(videoURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("YouTubeExtractor: Starting extraction for URL: %s", videoURL)
+	slog.Info("YouTubeExtractor: Starting extraction", "url", videoURL)
 
 	if playlistID := extractPlaylistID(videoURL); playlistID != "" {
 		return e.extractPlaylist(videoURL, playlistID, maxChars)
@@ -64,7 +64,7 @@ func (e *YouTubeExtractor) Extract(videoURL string, endpoint string, maxChars *i
 
 // extractVideo fetches title, channel, top comments, and transcript for a single YouTube video.
 func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("YouTubeExtractor: Extracted Video ID: %s for URL: %s", videoID, videoURL)
+	slog.Info("YouTubeExtractor: Extracted Video ID", "video_id", videoID, "url", videoURL)
 	result := &ExtractedResult{
 		URL:        videoURL,
 		SourceType: "youtube",
@@ -90,9 +90,9 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		if len(resp.Items) > 0 {
 			videoTitle = resp.Items[0].Snippet.Title
 			channelName = resp.Items[0].Snippet.ChannelTitle
-			log.Printf("YouTubeExtractor: Fetched Title: '%s', Channel: '%s' for %s", videoTitle, channelName, videoID)
+			slog.Debug("YouTubeExtractor: Fetched video details", "title", videoTitle, "channel", channelName, "video_id", videoID)
 		} else {
-			log.Printf("YouTubeExtractor: No video details found for %s", videoID)
+			slog.Warn("YouTubeExtractor: No video details found", "video_id", videoID)
 			errs = append(errs, "youtube api: no video details found")
 		}
 	}()
@@ -119,7 +119,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 				"text":   comment.TextDisplay,
 			})
 		}
-		log.Printf("YouTubeExtractor: Fetched %d comments for %s", len(commentsData), videoID)
+		slog.Debug("YouTubeExtractor: Fetched comments", "count", len(commentsData), "video_id", videoID)
 	}()
 
 	// 3. Fetch Transcript using yt-dlp command line
@@ -129,7 +129,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		log.Printf("YouTubeExtractor: Fetching transcript for %s", videoID)
+		slog.Debug("YouTubeExtractor: Fetching transcript", "video_id", videoID)
 
 		transcript, err := e.extractTranscript(ctx, videoID, videoURL)
 		if err != nil {
@@ -139,7 +139,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		}
 
 		transcriptText = transcript
-		log.Printf("YouTubeExtractor: Fetched transcript (length %d) for %s", len(transcriptText), videoID)
+		slog.Debug("YouTubeExtractor: Fetched transcript", "length", len(transcriptText), "video_id", videoID)
 	}()
 
 	wg.Wait()
@@ -194,7 +194,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 	}
 
 	if result.ProcessedSuccessfully {
-		log.Printf("YouTubeExtractor: Successfully extracted data for %s", videoURL)
+		slog.Info("YouTubeExtractor: Successfully extracted data", "url", videoURL)
 	}
 
 	return result, nil
@@ -202,7 +202,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 
 // extractPlaylist fetches the title, channel, and a list of video titles from a YouTube playlist.
 func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("YouTubeExtractor: Starting playlist extraction for ID: %s", playlistID)
+	slog.Info("YouTubeExtractor: Starting playlist extraction", "playlist_id", playlistID)
 	result := &ExtractedResult{
 		URL:        playlistURL,
 		SourceType: "youtube_playlist",
@@ -223,7 +223,7 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 	}
 	playlistTitle := playlistResp.Items[0].Snippet.Title
 	channelName := playlistResp.Items[0].Snippet.ChannelTitle
-	log.Printf("YouTubeExtractor: Fetched Playlist Title: '%s', Channel: '%s'", playlistTitle, channelName)
+	slog.Debug("YouTubeExtractor: Fetched playlist details", "title", playlistTitle, "channel", channelName)
 
 	// 2. Get Playlist Items (Video IDs and Titles)
 	var videoItems []map[string]string
@@ -243,7 +243,7 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 		logger.LogError("YouTubeExtractor: Error fetching playlist items for %s: %v", playlistID, err)
 		return result, err
 	}
-	log.Printf("YouTubeExtractor: Fetched %d video items from playlist %s", len(videoItems), playlistID)
+	slog.Debug("YouTubeExtractor: Fetched video items from playlist", "count", len(videoItems), "playlist_id", playlistID)
 
 	result.Data = YouTubePlaylistData{
 		Title:       playlistTitle,
@@ -429,7 +429,7 @@ func (e *YouTubeExtractor) extractTranscriptWithYTAPI(ctx context.Context, video
 		return "", fmt.Errorf("transcript service URL is not configured")
 	}
 
-	log.Printf("YouTubeExtractor: Calling transcript service for %s", videoID)
+	slog.Debug("YouTubeExtractor: Calling transcript service", "video_id", videoID)
 
 	requestBody, err := json.Marshal(map[string]string{"video_id": videoID})
 	if err != nil {
@@ -465,7 +465,7 @@ func (e *YouTubeExtractor) extractTranscriptWithYTAPI(ctx context.Context, video
 		return "", fmt.Errorf("failed to decode response from transcript service: %w", err)
 	}
 
-	log.Printf("YouTubeExtractor: Successfully got transcript from service for %s", videoID)
+	slog.Debug("YouTubeExtractor: Successfully got transcript from service", "video_id", videoID)
 	return successResponse.Transcript, nil
 }
 
@@ -476,7 +476,7 @@ func (e *YouTubeExtractor) extractTranscript(ctx context.Context, videoID, video
 	if e.Config != nil && e.Config.TranscriptOrder != "" {
 		orderStr = e.Config.TranscriptOrder
 	}
-	log.Printf("YouTubeExtractor: Configured transcript extraction order: %s for %s", orderStr, videoID)
+	slog.Debug("YouTubeExtractor: Configured transcript extraction order", "order", orderStr, "video_id", videoID)
 	methods := strings.Split(orderStr, ",")
 
 	for _, m := range methods {
@@ -485,26 +485,26 @@ func (e *YouTubeExtractor) extractTranscript(ctx context.Context, videoID, video
 		var err error
 		switch m {
 		case "ytapi", "youtube_api", "youtubeapi":
-			log.Printf("YouTubeExtractor: Attempting transcript extraction using youtube-transcript-api for %s", videoID)
+			slog.Debug("YouTubeExtractor: Attempting transcript extraction using youtube-transcript-api", "video_id", videoID)
 			txt, err = e.extractTranscriptWithYTAPI(ctx, videoID)
 		case "tactiq":
-			log.Printf("YouTubeExtractor: Attempting transcript extraction using Tactiq API for %s", videoID)
+			slog.Debug("YouTubeExtractor: Attempting transcript extraction using Tactiq API", "video_id", videoID)
 			txt, err = e.extractTranscriptWithTactiq(ctx, videoURL)
 		default:
 			continue // Unknown token, skip
 		}
 		if err == nil && strings.TrimSpace(txt) != "" {
-			log.Printf("YouTubeExtractor: Successfully extracted transcript using %s method for %s (length: %d)", m, videoID, len(txt))
+			slog.Info("YouTubeExtractor: Successfully extracted transcript", "method", m, "video_id", videoID, "length", len(txt))
 			return txt, nil
 		} else {
 			if err == nil && strings.TrimSpace(txt) == "" {
-				log.Printf("YouTubeExtractor: Failed to extract transcript using %s method for %s: transcript is empty", m, videoID)
+				slog.Warn("YouTubeExtractor: Transcript extraction failed, transcript is empty", "method", m, "video_id", videoID)
 			} else {
-				log.Printf("YouTubeExtractor: Failed to extract transcript using %s method for %s: %v", m, videoID, err)
+				slog.Warn("YouTubeExtractor: Transcript extraction failed", "method", m, "video_id", videoID, "error", err)
 			}
 		}
 	}
-	log.Printf("YouTubeExtractor: All transcript extraction methods failed for %s (tried: %s)", videoID, orderStr)
+	slog.Error("YouTubeExtractor: All transcript extraction methods failed", "video_id", videoID, "tried_methods", orderStr)
 	return "", fmt.Errorf("no transcript available via specified order (%s)", orderStr)
 }
 
@@ -535,7 +535,7 @@ func (e *YouTubeExtractor) extractTranscriptWithTactiq(ctx context.Context, vide
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing response body: %v", err)
+			slog.Warn("Error closing response body", "error", err)
 		}
 	}()
 

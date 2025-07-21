@@ -2,7 +2,7 @@ package extractor
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,7 +33,7 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, clien
 
 	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
+		slog.Warn("Failed to initialize YouTubeExtractor. YouTube URLs may not be processed.", "error", err)
 	} else {
 		d.register("youtube.com", ytExtractor)
 		d.register("youtu.be", ytExtractor)
@@ -68,7 +68,7 @@ func (d *Dispatcher) DispatchAndExtract(targetURL string, maxChars *int) (*Extra
 
 // DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
 func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("Dispatching URL: %s from endpoint: %s", targetURL, endpoint)
+	slog.Info("Dispatching URL", "url", targetURL, "endpoint", endpoint)
 
 	parsedURL, err := url.Parse(targetURL)
 	if err != nil {
@@ -88,14 +88,14 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	// Check for PDF first since it's a path check
 	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
 		if extractor, ok := d.extractors[".pdf"]; ok {
-			log.Printf("Dispatcher found match for %s with domain .pdf", targetURL)
+			slog.Debug("Dispatcher found match for PDF", "url", targetURL)
 			return extractor.Extract(targetURL, endpoint, maxChars)
 		}
 	}
 
 	for domain, extractor := range d.extractors {
 		if strings.Contains(hostname, domain) {
-			log.Printf("Dispatcher found match for %s with domain %s", targetURL, domain)
+			slog.Debug("Dispatcher found match", "url", targetURL, "domain", domain)
 			return extractor.Extract(targetURL, endpoint, maxChars)
 		}
 	}
@@ -103,7 +103,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	// For the /extract endpoint, use the headless browser if requested.
 	// For all other endpoints (like /search), always use the standard extractor.
 	if endpoint == "/extract" {
-		log.Printf("Using JS-enabled (headless) extractor for %s on /extract", targetURL)
+		slog.Debug("Using JS-enabled (headless) extractor", "url", targetURL, "endpoint", endpoint)
 		if d.jsWebpageExtractor != nil {
 			result, err := d.jsWebpageExtractor.Extract(targetURL, endpoint, maxChars)
 			if err != nil {
@@ -116,7 +116,7 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	}
 
 	// Fallback to the standard webpage extractor for /search or when headless is not requested.
-	log.Printf("Using standard webpage extractor for %s (endpoint: %s)", targetURL, endpoint)
+	slog.Debug("Using standard webpage extractor", "url", targetURL, "endpoint", endpoint)
 	if extractor, ok := d.extractors["webpage"]; ok {
 		result, err := extractor.Extract(targetURL, endpoint, maxChars)
 		if err != nil {
@@ -135,7 +135,7 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL st
 	} else {
 		errMsg = fmt.Sprintf("%s extractor not implemented (this should not happen if init was attempted)", sourceType)
 	}
-	log.Printf(errMsg + " for URL: " + targetURL)
+	slog.Error(errMsg, "url", targetURL)
 	return &ExtractedResult{
 		URL:                   targetURL,
 		SourceType:            sourceType,

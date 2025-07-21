@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -72,7 +72,7 @@ func NewClient(appConfig *config.AppConfig, client *http.Client) *Client {
 // fetchSerperResults fetches search results from the Serper.dev API.
 func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResults int) ([]string, error) {
 	if c.config.SerperAPIKey == "" {
-		log.Println("Serper API key is not configured. Skipping Serper search.")
+		slog.Warn("Serper API key is not configured. Skipping Serper search.")
 		return nil, fmt.Errorf("serper API key not configured")
 	}
 
@@ -102,7 +102,7 @@ func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResult
 		return nil, fmt.Errorf("error marshalling Serper request payload: %w", err)
 	}
 
-	log.Printf("Fetching Serper API results for query: '%s' from %s with num: %d\n", query, apiURL, numResultsToRequest)
+	slog.Info("Fetching Serper API results", "query", query, "url", apiURL, "num_results", numResultsToRequest)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -119,7 +119,7 @@ func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResult
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Warning: failed to close response body: %v", err)
+			slog.Warn("Failed to close response body", "error", err)
 		}
 	}()
 
@@ -144,7 +144,7 @@ func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResult
 			}
 		}
 	}
-	log.Printf("Fetched %d URLs from Serper API.\n", len(urls))
+	slog.Info("Fetched URLs from Serper API", "count", len(urls))
 	return urls, nil
 }
 
@@ -153,7 +153,7 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 	resultsPerPage := 10 // Default assumption for SearxNG
 	maxPages := 5        // Maximum pages to fetch concurrently
 
-	log.Printf("Fetching SearxNG results for query: '%s', aiming for %d results with concurrent pagination.\n", query, maxResults)
+	slog.Info("Fetching SearxNG results", "query", query, "max_results", maxResults)
 
 	// Calculate how many pages we might need
 	estimatedPages := (maxResults + resultsPerPage - 1) / resultsPerPage
@@ -197,7 +197,7 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 			params.Add("pageno", fmt.Sprintf("%d", pageNum))
 			apiURL.RawQuery = params.Encode()
 
-			log.Printf("Fetching page %d from SearxNG: %s\n", pageNum, apiURL.String())
+			slog.Debug("Fetching page from SearxNG", "page", pageNum, "url", apiURL.String())
 
 			req, err := http.NewRequestWithContext(ctx, "GET", apiURL.String(), nil)
 			if err != nil {
@@ -214,7 +214,7 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 			}
 			defer func() {
 				if err := resp.Body.Close(); err != nil {
-					log.Printf("Warning: failed to close response body for page %d: %v", pageNum, err)
+					slog.Warn("Failed to close response body for page", "page", pageNum, "error", err)
 				}
 			}()
 
@@ -232,7 +232,7 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 				return
 			}
 
-			log.Printf("Fetched %d results from SearxNG page %d\n", len(searxNGResp.Results), pageNum)
+			slog.Debug("Fetched results from SearxNG page", "count", len(searxNGResp.Results), "page", pageNum)
 			resultsChan <- pageResult{page: pageNum, items: searxNGResp.Results, err: nil}
 		}(page)
 	}
@@ -267,13 +267,13 @@ func (c *Client) fetchSearxNGResults(ctx context.Context, query string, maxResul
 			allItems = append(allItems, items...)
 			// Stop if we have enough results
 			if len(allItems) >= maxResults*2 && maxResults > 0 {
-				log.Printf("Collected enough candidates (%d) from SearxNG, stopping.", len(allItems))
+				slog.Debug("Collected enough candidates from SearxNG, stopping.", "count", len(allItems))
 				break
 			}
 		}
 	}
 
-	log.Printf("Total items collected from SearxNG: %d\n", len(allItems))
+	slog.Info("Total items collected from SearxNG", "count", len(allItems))
 	return allItems, nil
 }
 
@@ -286,11 +286,11 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 	mainEngine := strings.ToLower(c.config.MainSearchEngine)
 	fallbackEngine := strings.ToLower(c.config.FallbackSearchEngine)
 
-	log.Printf("Main search engine: '%s', Fallback search engine: '%s'", mainEngine, fallbackEngine)
+	slog.Info("Search engines configured", "main", mainEngine, "fallback", fallbackEngine)
 
 	// Try Main Search Engine
 	if mainEngine != "" {
-		log.Printf("Attempting search with main engine: %s", mainEngine)
+		slog.Info("Attempting search with main engine", "engine", mainEngine)
 		switch mainEngine {
 		case "searxng":
 			searxngItems, fetchErr := c.fetchSearxNGResults(ctx, query, maxResults)
@@ -304,9 +304,9 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 				for i := 0; i < len(searxngItems) && i < maxResults; i++ {
 					urls = append(urls, searxngItems[i].URL)
 				}
-				log.Printf("Got %d results from main engine (SearxNG)", len(urls))
+				slog.Info("Got results from main engine (SearxNG)", "count", len(urls))
 			} else {
-				log.Printf("Main engine (SearxNG) returned 0 results.")
+				slog.Info("Main engine (SearxNG) returned 0 results.")
 			}
 		case "serper":
 			serperURLs, fetchErr := c.fetchSerperResults(ctx, query, maxResults)
@@ -315,16 +315,16 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 				err = fetchErr // Store error
 			} else if len(serperURLs) > 0 {
 				urls = serperURLs
-				log.Printf("Got %d results from main engine (Serper)", len(urls))
+				slog.Info("Got results from main engine (Serper)", "count", len(urls))
 			} else {
-				log.Printf("Main engine (Serper) returned 0 results.")
+				slog.Info("Main engine (Serper) returned 0 results.")
 			}
 		default:
-			log.Printf("Unsupported main search engine configured: %s", mainEngine)
+			slog.Error("Unsupported main search engine configured", "engine", mainEngine)
 			err = fmt.Errorf("unsupported main search engine: %s", mainEngine)
 		}
 	} else {
-		log.Println("No main search engine configured.")
+		slog.Warn("No main search engine configured.")
 		// If no main engine, we might proceed directly to fallback or error out.
 		// For now, let's assume an error if no main engine is set and we need results.
 		err = fmt.Errorf("no main search engine configured")
@@ -348,10 +348,10 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 				for i := 0; i < len(searxngItems) && i < maxResults; i++ {
 					urls = append(urls, searxngItems[i].URL)
 				}
-				log.Printf("Got %d results from fallback engine (SearxNG)", len(urls))
+				slog.Info("Got results from fallback engine (SearxNG)", "count", len(urls))
 				err = nil // Clear previous error as fallback succeeded
 			} else {
-				log.Printf("Fallback engine (SearxNG) returned 0 results.")
+				slog.Info("Fallback engine (SearxNG) returned 0 results.")
 				// If err was already set by main engine, keep it. If main was just empty, set new error.
 				if err == nil {
 					fallbackErr = fmt.Errorf("fallback engine (SearxNG) returned 0 results")
@@ -364,16 +364,16 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 				fallbackErr = fetchErr
 			} else if len(serperURLs) > 0 {
 				urls = serperURLs // Overwrite with fallback results
-				log.Printf("Got %d results from fallback engine (Serper)", len(urls))
+				slog.Info("Got results from fallback engine (Serper)", "count", len(urls))
 				err = nil // Clear previous error as fallback succeeded
 			} else {
-				log.Printf("Fallback engine (Serper) returned 0 results.")
+				slog.Info("Fallback engine (Serper) returned 0 results.")
 				if err == nil {
 					fallbackErr = fmt.Errorf("fallback engine (Serper) returned 0 results")
 				}
 			}
 		default:
-			log.Printf("Unsupported fallback search engine configured: %s", fallbackEngine)
+			slog.Error("Unsupported fallback search engine configured", "engine", fallbackEngine)
 			fallbackErr = fmt.Errorf("unsupported fallback search engine: %s", fallbackEngine)
 		}
 		// If fallback also had an error, and main had an error, prioritize main's error or combine.
@@ -396,10 +396,10 @@ func (c *Client) FetchResults(ctx context.Context, query string, maxResults int)
 		return nil, err
 	}
 	if len(urls) == 0 {
-		log.Printf("No results found for query '%s' after attempting configured search engines.", query)
+		slog.Warn("No results found for query after attempting configured search engines.", "query", query)
 		return nil, fmt.Errorf("no results found for query: %s", query)
 	}
 
-	log.Printf("Returning %d top URLs after processing main/fallback engines.\n", len(urls))
+	slog.Info("Returning top URLs after processing main/fallback engines.", "count", len(urls))
 	return urls, nil
 }

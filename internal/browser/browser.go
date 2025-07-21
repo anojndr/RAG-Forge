@@ -1,7 +1,7 @@
 package browser
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/go-rod/rod"
@@ -30,7 +30,7 @@ func NewPool(size int) (*Pool, error) {
 		pool.browsers <- browser
 	}
 
-	log.Printf("Browser pool initialized with %d instances.", size)
+	slog.Info("Browser pool initialized", "size", size)
 	return pool, nil
 }
 
@@ -55,7 +55,7 @@ func (p *Pool) Cleanup() {
 		browser.MustClose()
 	}
 	p.launcher.Cleanup()
-	log.Println("Browser pool cleaned up.")
+	slog.Info("Browser pool cleaned up.")
 }
 
 // NewLauncher creates and configures a new Rod launcher with standardized settings.
@@ -68,8 +68,33 @@ func NewLauncher() *launcher.Launcher {
 		Set("--disable-gpu").
 		Set("--disable-dev-shm-usage").
 		Set("--disable-extensions").
-		Set("--disable-plugins").
+		Set("--disable-plugins-discovery"). // Changed from --disable-plugins
 		Set("--disable-images").
-		Set("--disable-javascript-harmony-shipping").
-		Set("--disable-background-networking")
+		Set("--disable-background-networking").
+        // ---- ADD THESE ----
+		Set("--disable-background-timer-throttling").
+		Set("--disable-backgrounding-occluded-windows").
+		Set("--disable-breakpad").
+		Set("--disable-client-side-phishing-detection").
+		Set("--disable-component-update").
+		Set("--disable-default-apps").
+		Set("--disable-domain-reliability").
+		Set("--disable-features", "AudioServiceOutOfProcess,IsolateOrigins,site-per-process").
+		Set("--disable-hang-monitor").
+		Set("--disable-ipc-flooding-protection").
+		Set("--disable-notifications").
+		Set("--disable-popup-blocking").
+		Set("--disable-print-preview").
+		Set("--disable-prompt-on-repost").
+		Set("--disable-renderer-backgrounding").
+		Set("--disable-sync").
+		Set("--disable-translate").
+		Set("--metrics-recording-only").
+		Set("--mute-audio").
+		Set("--no-first-run").
+		Set("--safebrowsing-disable-auto-update").
+		Set("--enable-automation").
+		Set("--password-store", "basic").
+		Set("--use-mock-keychain")
+        // Note: --disable-javascript-harmony-shipping is deprecated
 }

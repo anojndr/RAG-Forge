@@ -2,7 +2,7 @@ package extractor
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +29,7 @@ func NewWebpageExtractor(appConfig *config.AppConfig, client *http.Client) *Webp
 
 // Extract uses Colly to scrape visible text content and title from a webpage.
 func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("WebpageExtractor: Starting extraction for URL: %s", url)
+	slog.Info("WebpageExtractor: Starting extraction", "url", url)
 	result := &ExtractedResult{
 		URL:        url,
 		SourceType: "webpage",
@@ -64,7 +64,7 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (
 	})
 
 	c.OnScraped(func(r *colly.Response) {
-		log.Printf("WebpageExtractor: Finished scraping %s. Title: '%s', Text length: %d", url, pageTitle, textContentBuilder.Len())
+		slog.Info("WebpageExtractor: Finished scraping", "url", url, "title", pageTitle, "text_length", textContentBuilder.Len())
 	})
 
 	err := c.Visit(url)
@@ -100,7 +100,7 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (
 
 // ExtractFromContent extracts content from a pre-fetched byte slice.
 func (e *WebpageExtractor) ExtractFromContent(url string, content []byte, maxChars *int) (*ExtractedResult, error) {
-	log.Printf("WebpageExtractor: Starting extraction from content for URL: %s", url)
+	slog.Info("WebpageExtractor: Starting extraction from content", "url", url)
 	result := &ExtractedResult{
 		URL:        url,
 		SourceType: "webpage",
@@ -124,7 +124,7 @@ func (e *WebpageExtractor) ExtractFromContent(url string, content []byte, maxCha
 		Title:       pageTitle,
 	}
 
-	log.Printf("WebpageExtractor: Finished extracting from content for %s. Title: '%s', Text length: %d", url, pageTitle, textContentBuilder.Len())
+	slog.Info("WebpageExtractor: Finished extracting from content", "url", url, "title", pageTitle, "text_length", textContentBuilder.Len())
 
 	if maxChars != nil {
 		if data, ok := result.Data.(WebpageData); ok {
