@@ -2,8 +2,6 @@ package useragent
 
 import (
 	"math/rand"
-	"strings"
-	"time"
 )
 
 var (
@@ -43,28 +41,17 @@ var (
 	desktopAgents []string
 	mobileAgents  []string
 
-	rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
-func init() {
-	for _, ua := range userAgents {
-		lowerUA := strings.ToLower(ua)
-		if strings.Contains(lowerUA, "mobile") || strings.Contains(lowerUA, "iphone") || strings.Contains(lowerUA, "android") {
-			mobileAgents = append(mobileAgents, ua)
-		} else {
-			desktopAgents = append(desktopAgents, ua)
-		}
-	}
-}
 
 func Random() string {
-	return userAgents[rng.Intn(len(userAgents))]
+	return userAgents[rand.Intn(len(userAgents))]
 }
 
 func RandomDesktop() string {
-	return desktopAgents[rng.Intn(len(desktopAgents))]
+	return desktopAgents[rand.Intn(len(desktopAgents))]
 }
 
 func RandomMobile() string {
-	return mobileAgents[rng.Intn(len(mobileAgents))]
+	return mobileAgents[rand.Intn(len(mobileAgents))]
 }

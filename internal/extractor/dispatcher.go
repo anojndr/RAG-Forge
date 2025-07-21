@@ -17,39 +17,46 @@ type Dispatcher struct {
 	Config             *config.AppConfig
 	BrowserPool        *browser.Pool
 	mainHTTPClient     *http.Client
-	youtubeExtractor   Extractor
-	redditExtractor    Extractor
-	twitterExtractor   Extractor
-	pdfExtractor       Extractor
-	webpageExtractor   Extractor
+	extractors         map[string]Extractor
 	jsWebpageExtractor Extractor
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
 func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *Dispatcher {
-	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
-	if err != nil {
-		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
-		// Depending on desired behavior, you might want to panic or handle this more gracefully.
-		// For now, we'll let it proceed with a nil extractor for YouTube.
-	}
-
-	rdExtractor := NewRedditExtractor(appConfig, client)
-	twExtractor := NewTwitterExtractor(appConfig, browserPool, client)
-	pdfExtractor := NewPDFExtractor(appConfig, client)
-	wpExtractor := NewWebpageExtractor(appConfig, client)
-	jsWpExtractor := NewJSWebpageExtractor(appConfig, browserPool, client)
-
-	return &Dispatcher{
+	d := &Dispatcher{
 		Config:             appConfig,
 		BrowserPool:        browserPool,
 		mainHTTPClient:     client,
-		youtubeExtractor:   Extractor(ytExtractor), // This can be nil if NewYouTubeExtractor failed
-		redditExtractor:    Extractor(rdExtractor),
-		twitterExtractor:   Extractor(twExtractor),
-		pdfExtractor:       Extractor(pdfExtractor),
-		webpageExtractor:   Extractor(wpExtractor),
-		jsWebpageExtractor: Extractor(jsWpExtractor),
+		extractors:         make(map[string]Extractor),
+		jsWebpageExtractor: NewJSWebpageExtractor(appConfig, browserPool, client),
+	}
+
+	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
+	} else {
+		d.register("youtube.com", ytExtractor)
+		d.register("youtu.be", ytExtractor)
+		d.register("youtube-nocookie.com", ytExtractor)
+		d.register("music.youtube.com", ytExtractor)
+		d.register("gaming.youtube.com", ytExtractor)
+		d.register("tv.youtube.com", ytExtractor)
+		d.register("m.youtube.com", ytExtractor)
+	}
+
+	d.register("reddit.com", NewRedditExtractor(appConfig, client))
+	d.register("redd.it", NewRedditExtractor(appConfig, client))
+	d.register("twitter.com", NewTwitterExtractor(appConfig, browserPool, client))
+	d.register("x.com", NewTwitterExtractor(appConfig, browserPool, client))
+	d.register(".pdf", NewPDFExtractor(appConfig, client))
+	d.register("webpage", NewWebpageExtractor(appConfig, client))
+
+	return d
+}
+
+func (d *Dispatcher) register(domain string, extractor Extractor) {
+	if extractor != nil {
+		d.extractors[domain] = extractor
 	}
 }
 
@@ -78,73 +85,20 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	hostname := strings.ToLower(parsedURL.Hostname())
 
-	// 1. Check for YouTube (comprehensive domain check)
-	if (strings.Contains(hostname, "youtube.com") ||
-		strings.Contains(hostname, "youtu.be") ||
-		strings.Contains(hostname, "youtube-nocookie.com") ||
-		strings.Contains(hostname, "music.youtube.com") ||
-		strings.Contains(hostname, "gaming.youtube.com") ||
-		strings.Contains(hostname, "tv.youtube.com") ||
-		strings.Contains(hostname, "m.youtube.com")) {
-		log.Printf("Identified %s as YouTube URL", targetURL)
-		if d.youtubeExtractor != nil {
-			result, err := d.youtubeExtractor.Extract(targetURL, endpoint, maxChars)
-			if err != nil {
-				return result, fmt.Errorf("youtube extraction failed: %w", err)
-			}
-			return result, nil
-		}
-		result, err := d.unimplementedOrFailedInitExtractor("youtube", targetURL, d.youtubeExtractor == nil)
-		return result, err
-	}
-
-	// 2. Check for Reddit
-	if strings.Contains(hostname, "reddit.com") || strings.Contains(hostname, "redd.it") {
-		log.Printf("Identified %s as Reddit URL", targetURL)
-		if d.redditExtractor != nil {
-			result, err := d.redditExtractor.Extract(targetURL, endpoint, maxChars)
-			if err != nil {
-				return result, fmt.Errorf("reddit extraction failed: %w", err)
-			}
-			return result, nil
-		}
-		result, err := d.unimplementedOrFailedInitExtractor("reddit", targetURL, d.redditExtractor == nil)
-		return result, err
-	}
-
-	// 3. Check for Twitter/X
-	if IsTwitterDomain(hostname) {
-		log.Printf("Identified %s as Twitter/X URL", targetURL)
-
-		if d.twitterExtractor != nil {
-			result, err := d.twitterExtractor.Extract(targetURL, endpoint, maxChars)
-			if err != nil {
-				return result, fmt.Errorf("twitter extraction failed: %w", err)
-			}
-			return result, nil
-		}
-		result, err := d.unimplementedOrFailedInitExtractor("twitter", targetURL, d.twitterExtractor == nil)
-		return result, err
-	}
-
-	// 4. Check for PDF URLs
+	// Check for PDF first since it's a path check
 	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
-		log.Printf("Identified %s as PDF URL", targetURL)
-		if d.pdfExtractor != nil {
-			result, err := d.pdfExtractor.Extract(targetURL, endpoint, maxChars)
-			if err != nil {
-				// If PDF extraction fails, we don't fall back to webpage because we are confident it's a PDF.
-				return result, fmt.Errorf("pdf extraction failed: %w", err)
-			}
-			return result, nil
+		if extractor, ok := d.extractors[".pdf"]; ok {
+			log.Printf("Dispatcher found match for %s with domain .pdf", targetURL)
+			return extractor.Extract(targetURL, endpoint, maxChars)
 		}
-		result, err := d.unimplementedOrFailedInitExtractor("pdf", targetURL, d.pdfExtractor == nil)
-		return result, err
 	}
 
-
-	// 5. Default to General Web Page Extractor
-	log.Printf("Identified %s as general webpage URL", targetURL)
+	for domain, extractor := range d.extractors {
+		if strings.Contains(hostname, domain) {
+			log.Printf("Dispatcher found match for %s with domain %s", targetURL, domain)
+			return extractor.Extract(targetURL, endpoint, maxChars)
+		}
+	}
 
 	// For the /extract endpoint, use the headless browser if requested.
 	// For all other endpoints (like /search), always use the standard extractor.
@@ -163,14 +117,14 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 
 	// Fallback to the standard webpage extractor for /search or when headless is not requested.
 	log.Printf("Using standard webpage extractor for %s (endpoint: %s)", targetURL, endpoint)
-	if d.webpageExtractor != nil {
-		result, err := d.webpageExtractor.Extract(targetURL, endpoint, maxChars)
+	if extractor, ok := d.extractors["webpage"]; ok {
+		result, err := extractor.Extract(targetURL, endpoint, maxChars)
 		if err != nil {
 			return result, fmt.Errorf("webpage extraction failed: %w", err)
 		}
 		return result, nil
 	}
-	result, err := d.unimplementedOrFailedInitExtractor("webpage", targetURL, d.webpageExtractor == nil)
+	result, err := d.unimplementedOrFailedInitExtractor("webpage", targetURL, d.extractors["webpage"] == nil)
 	return result, err
 }
 
