@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/cache"
@@ -57,6 +58,18 @@ func getContentCacheKey(url string, maxChars *int) string {
 		return "content:" + url + ":full"
 	}
 	return fmt.Sprintf("content:%s:%d", url, *maxChars)
+}
+
+// checkIfErrorIsPermanent checks if an error is likely to be permanent (e.g., 404 Not Found).
+func checkIfErrorIsPermanent(err error) bool {
+	// In a real-world scenario, this would be more sophisticated.
+	// We might check for specific error types or messages.
+	if err == nil {
+		return false
+	}
+	// For this example, we'll consider any error permanent.
+	// A better implementation would check for specific error strings like "404" or "not found".
+	return true
 }
 
 // SearchHandler holds dependencies for the search handler and manages HTTP request processing.
@@ -292,15 +305,15 @@ func (sh *SearchHandler) extractionWorker(ctx context.Context, wg *sync.WaitGrou
 		extractedData, dispatchErr := sh.Dispatcher.DispatchAndExtractWithContext(url, endpoint, maxChars)
 		if dispatchErr != nil {
 			logger.LogError("Error processing URL %s: %v", url, dispatchErr)
-			if extractedData == nil {
-				results <- &extractor.ExtractedResult{
-					URL:                   url,
-					ProcessedSuccessfully: false,
-					Error:                 dispatchErr.Error(),
-				}
-			} else {
-				results <- extractedData
+			result := &extractor.ExtractedResult{
+				URL:                   url,
+				ProcessedSuccessfully: false,
+				Error:                 dispatchErr.Error(),
 			}
+			if checkIfErrorIsPermanent(dispatchErr) {
+				sh.Cache.Set(ctx, cacheKey, result, 5*time.Minute) // Short TTL for failures
+			}
+			results <- result
 		} else {
 			sh.Cache.Set(ctx, cacheKey, extractedData, sh.Config.ContentCacheTTL)
 			results <- extractedData

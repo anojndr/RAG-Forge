@@ -86,8 +86,17 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 	}
 
 	// Scroll to the bottom of the page to trigger lazy loading
-	for i := 0; i < 10; i++ {
-		page.Context(ctx).Eval("window.scrollTo(0, document.body.scrollHeight)")
+	lastHeight := int64(-1)
+	for {
+		height := page.MustEval("() => document.body.scrollHeight")
+		currentHeight := height.Int()
+		if int64(currentHeight) == lastHeight {
+			log.Printf("JSWebpageExtractor: Page height stabilized at %d for %s", currentHeight, url)
+			break // Stop if height is stable
+		}
+		lastHeight = int64(currentHeight)
+
+		page.MustEval("window.scrollTo(0, document.body.scrollHeight)")
 		page.MustWaitStable()
 	}
 
