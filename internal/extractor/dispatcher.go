@@ -10,14 +10,12 @@ import (
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
-	"web-search-api-for-llms/internal/utils"
 )
 
 // Dispatcher is responsible for identifying the type of URL and calling the appropriate extractor.
 type Dispatcher struct {
 	Config             *config.AppConfig
 	BrowserPool        *browser.Pool
-	PythonPool         *utils.PythonPool
 	mainHTTPClient     *http.Client
 	youtubeExtractor   Extractor
 	redditExtractor    Extractor
@@ -28,8 +26,8 @@ type Dispatcher struct {
 }
 
 // NewDispatcher creates a new Dispatcher and initializes all concrete extractors.
-func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, pythonPool *utils.PythonPool, client *http.Client) *Dispatcher {
-	ytExtractor, err := NewYouTubeExtractor(appConfig, client, pythonPool)
+func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, client *http.Client) *Dispatcher {
+	ytExtractor, err := NewYouTubeExtractor(appConfig, client)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize YouTubeExtractor: %v. YouTube URLs may not be processed.", err)
 		// Depending on desired behavior, you might want to panic or handle this more gracefully.
@@ -45,7 +43,6 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, pytho
 	return &Dispatcher{
 		Config:             appConfig,
 		BrowserPool:        browserPool,
-		PythonPool:         pythonPool,
 		mainHTTPClient:     client,
 		youtubeExtractor:   Extractor(ytExtractor), // This can be nil if NewYouTubeExtractor failed
 		redditExtractor:    Extractor(rdExtractor),

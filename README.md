@@ -27,10 +27,10 @@ The service is built with performance in mind, featuring concurrent processing o
 *   **Performance Optimized**:
     *   **Concurrent Processing**: Extracts from multiple URLs in parallel for high throughput.
     *   **Caching**: In-memory and Redis cache support for both search results and extracted content.
-*   **Simplified Dependencies**: Automatically validates system dependencies and manages required Python packages in a local `venv` virtual environment. No manual `pip install` required.
-*   **Monitoring**: Includes a `GET /health` endpoint for simple health checks.
-
-## Try it Live
+   *   **Decoupled Architecture**: YouTube transcript extraction is handled by a separate, independent Python microservice, improving performance and stability.
+   *   **Monitoring**: Includes a `GET /health` endpoint for simple health checks.
+   
+   ## Try it Live
 
 You can see this API in action by checking out the **Discord AI Chatbot**, which uses RAG-Forge as its primary tool for web content extraction.
 
@@ -47,22 +47,22 @@ A high-level overview of the main directories and key files:
     *   `config/`: Manages application configuration from `.env` files.
     *   `extractor/`: Implements the content extraction logic for all supported source types.
     *   `searxng/`: Client for interacting with search engines (SearxNG and Serper).
-    *   `utils/`: Manages Python virtual environments and system dependency checks.
-*   [`main.go`](main.go): The entry point for the Go API server.
-*   [`DOCS.md`](DOCS.md): **Comprehensive documentation on setup, configuration, API reference, and usage.**
-*   [`go.mod`](go.mod): Defines the Go module and its dependencies.
+   *   `transcript-service/`: A separate Python FastAPI microservice for YouTube transcript extraction.
+   *   [`main.go`](main.go): The entry point for the Go API server.
+   *   [`DOCS.md`](DOCS.md): **Comprehensive documentation on setup, configuration, API reference, and usage.**
+   *   [`go.mod`](go.mod): Defines the Go module and its dependencies.
 
 ## Prerequisites
 
 To run this project, you need the following installed and available in your system's PATH:
 
 *   **Go**: Version 1.23.1 or higher.
-*   **Python**: Version 3.8 or higher, along with `pip`. (Python packages are installed automatically by the app).
+*   **Docker & Docker Compose**: For running the transcript microservice.
 *   **External Tools**:
-    *   **`pdftotext`**: For PDF extraction (from the `poppler-utils` package).
-    *   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
+	*   **`pdftotext`**: For PDF extraction (from the `poppler-utils` package).
+	*   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
 *   **Search Engine**:
-    *   A running **SearxNG** instance OR a **Serper API** key.
+	*   A running **SearxNG** instance OR a **Serper API** key.
 
 For detailed, command-line installation instructions, please refer to the **[Installation section in DOCS.md](DOCS.md)**.
 
@@ -85,9 +85,18 @@ For detailed, command-line installation instructions, please refer to the **[Ins
     ```
 
 4.  **Run the API Server:**
-    The server will automatically validate dependencies, create a Python virtual environment (`venv`), and install necessary packages on the first run.
+    There are two ways to run the application:
+   
+    **Option 1: With Docker (Recommended)**
+    The server now depends on the transcript microservice. You will need to run it using Docker Compose.
     ```bash
-    go run main.go
+    docker-compose up --build
+    ```
+   
+    **Option 2: Without Docker**
+    A convenience script is provided to run both services locally without Docker.
+    ```bash
+    ./run-no-docker.sh
     ```
 
 ## API Usage

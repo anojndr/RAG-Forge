@@ -18,7 +18,6 @@ import (
 	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
-	"web-search-api-for-llms/internal/utils"
 )
 
 var gzipWriterPool = sync.Pool{
@@ -40,17 +39,8 @@ func main() {
 
 	// Validate system dependencies
 	log.Println("Validating system dependencies...")
-	if err := utils.ValidateSystemDependencies(); err != nil {
-		logger.LogError("System dependency validation failed: %v", err)
-		log.Printf("Warning: System dependency validation failed: %v", err)
-		log.Printf("Some features may not work correctly. Please ensure:")
-		log.Printf("  - Python 3.8+ is installed and available")
-		log.Printf("  - pip is available with Python")
-		log.Printf("  - pdftotext is installed (poppler-utils package)")
-		log.Printf("Continuing startup...")
-	} else {
-		log.Printf("System dependencies validated successfully (Python: %s)", utils.GetPythonCommand())
-	}
+	// TODO: Add a check for pdftotext if it's still needed.
+	log.Println("Skipping Python dependency validation as it is no longer required.")
 
 	// Initialize browser pool
 	browserPool, err := browser.NewPool(appConfig.BrowserPoolSize)
@@ -81,26 +71,8 @@ func main() {
 		appCache = cache.NewMemoryCache(10*time.Minute, 15*time.Minute)
 	}
 
-	// Ensure Python dependencies are installed in venv
-	log.Println("Ensuring Python dependencies are installed in venv...")
-	if err := utils.InstallPythonPackage("youtube-transcript-api"); err != nil {
-		// Log a warning but don't fail, as it might already be installed
-		logger.LogErrorf("Warning: could not ensure python package is installed: %v", err)
-	} else {
-		log.Println("Python dependencies verified.")
-	}
-
-	// Initialize Python helper pool
-	pythonPool, err := utils.NewPythonPool(appConfig.PythonPoolSize, func() (*utils.PythonHelper, error) {
-		return utils.NewPythonHelper("internal/extractor/youtube_helper.py")
-	})
-	if err != nil {
-		log.Fatalf("Failed to create python pool: %v", err)
-	}
-	defer pythonPool.Close()
-
 	// Initialize handlers
-	searchHandler := api.NewSearchHandler(appConfig, browserPool, pythonPool, httpClient, appCache)
+	searchHandler := api.NewSearchHandler(appConfig, browserPool, httpClient, appCache)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()

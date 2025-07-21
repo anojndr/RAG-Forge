@@ -32,11 +32,11 @@ Welcome to the complete documentation for RAG-Forge, a web content extraction AP
 -   **Flexible Search Backend**: Use a self-hosted **SearxNG** instance or the commercial **Serper.dev** API. Supports a primary and fallback configuration.
 -   **Intelligent Extraction**:
     -   **Twitter/X**: Uses browser automation to log in and scrape full post content and comments. It can also extract the latest ~5 tweets from a user's profile page. Session cookies are saved to accelerate subsequent requests.
-    -   **YouTube**: Fetches metadata/comments via the official API and uses a robust Python-based transcript extractor (`youtube-transcript-api`) with automated dependency management in a local `venv`. Transcript extraction order is configurable.
+    -   **YouTube**: Fetches metadata/comments via the official API and gets transcripts from a dedicated Python microservice. Transcript extraction order is configurable.
     -   **Reddit**: Intelligently parses different Reddit URL types (posts, subreddits, user profiles) and extracts actual content, filtering out "load more" placeholders.
--   **Automatic Dependency Management**: On startup, the application validates system dependencies (`python`, `pip`) and automatically creates a Python virtual environment (`venv`) to install necessary packages. **No more manual `pip install` is required.**
--   **Performance Optimized**: Utilizes concurrent processing for multiple URLs and a two-level caching system (in-memory or Redis) for both search queries and URL content.
--   **Structured Output**: Returns clean, structured JSON data, perfect for feeding into LLMs or RAG systems.
+   -   **Decoupled Architecture**: YouTube transcript extraction is handled by a separate, containerized Python microservice, which improves performance, scalability, and stability.
+   -   **Performance Optimized**: Utilizes concurrent processing for multiple URLs and a two-level caching system (in-memory or Redis) for both search queries and URL content.
+   -   **Structured Output**: Returns clean, structured JSON data, perfect for feeding into LLMs or RAG systems.
 -   **Health Check**: Includes a `/health` endpoint for easy integration with monitoring and orchestration tools.
 
 ## Prerequisites & Installation
@@ -46,14 +46,9 @@ Before you begin, ensure you have the following dependencies installed and avail
 ### 1. System Dependencies
 
 -   **Go**: Version 1.23.1 or higher.
--   **Python**: Version 3.8 or higher, along with `pip`. The application will use these to create its own isolated environment.
+-   **Docker & Docker Compose**: Required to run the main application and the transcript microservice together.
 -   **Chromium-based Browser**: Required for the `/extract` endpoint and Twitter/X features.
-    -   Install Google Chrome, Chromium, or another compatible browser.
-
-### 2. Python Packages
-**No manual installation is needed!** The application manages its own Python dependencies in a local virtual environment (`./venv`). On its first run, the API will automatically:
-1.  Create the `venv` folder if it doesn't exist.
-2.  Install all required Python packages (e.g., `youtube-transcript-api`) into it.
+	-   Install Google Chrome, Chromium, or another compatible browser.
 
 ### 3. Application Setup
 
@@ -82,6 +77,7 @@ Configuration is managed via a `.env` file in the project root.
 | Variable                  | Description                                                                                               | Default                            | Required?                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
 | `PORT`                    | The port for the API server. *Note: The port is currently hardcoded to `8086` in `main.go` for simplicity.* | `8080`                             | No                                 |
+| `TRANSCRIPT_SERVICE_URL`  | The URL of the Python transcript microservice.                                                            | `http://localhost:8000`            | No                                 |
 | `MAIN_SEARCH_ENGINE`      | The primary search engine. Can be `searxng` or `serper`.                                                    | `searxng`                          | No                                 |
 | `FALLBACK_SEARCH_ENGINE`  | The fallback engine if the primary fails. Can be `searxng`, `serper`, or empty.                           | `serper`                           | No                                 |
 | `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://localhost:18088`           | If using `searxng`                 |
@@ -103,13 +99,27 @@ Configuration is managed via a `.env` file in the project root.
 
 ## Running the API
 
-With your dependencies installed and `.env` file configured, start the server with:
+There are two recommended ways to run the application and its microservice.
 
+### Option 1: With Docker (Recommended)
+This is the simplest way to get started. With your dependencies installed and `.env` file configured, start both services with:
 ```bash
-go run main.go
+docker-compose up --build
 ```
+This command builds the Docker images for both the Go API and the Python transcript service and runs them in a networked environment.
 
-The server will log its startup status, port, and available endpoints to the console. It runs on port **8086**.
+### Option 2: Without Docker
+A convenience script, `run-no-docker.sh`, is provided to set up and run both services locally. This script will:
+1. Create a Python virtual environment for the transcript service.
+2. Install its dependencies from `requirements.txt`.
+3. Start the Python service in the background.
+4. Start the Go API server.
+
+To use it, simply run:
+```bash
+./run-no-docker.sh
+```
+Both services will run in your local terminal. The script will also handle graceful shutdown of both processes when you stop it (e.g., with `Ctrl+C`).
 
 ## API Reference
 
@@ -301,9 +311,10 @@ if __name__ == "__main__":
     -   Make sure your `TWITTER_USERNAME` and `TWITTER_PASSWORD` are correct.
     -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login attempt.
 -   **YouTube transcript extraction fails**:
-    -   Ensure Python 3.8+ and `pip` are installed. Check the console logs for any Python or `pip` errors during the automatic `venv` setup. If the helper script fails, the API will still attempt to return other data like title and comments.
+	-   Check the logs for the `transcript-service` container using `docker-compose logs transcript-service`.
+	-   Ensure the service is running and accessible from the main Go application at the `TRANSCRIPT_SERVICE_URL`.
 -   **Server fails to start with "address already in use"**:
-    -   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
+	-   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
 
 ## Development & Testing
 

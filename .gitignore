@@ -1,3 +1,5 @@
 twitter_cookies.json
 .env
-venv
+transcript-service/requirements.txt.cached
+transcript-service/__pycache__
+transcript-service/venv

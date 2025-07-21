@@ -29,6 +29,8 @@ type AppConfig struct {
 	// Twitter/X credentials for content extraction
 	TwitterUsername string
 	TwitterPassword string
+	// URL for the transcript microservice
+	TranscriptServiceURL string
 
 	// Cache configuration
 	CacheType      string
@@ -39,7 +41,6 @@ type AppConfig struct {
 	ContentCacheTTL time.Duration
 	MaxConcurrentExtractions int
 	BrowserPoolSize          int
-	PythonPoolSize           int
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -68,6 +69,7 @@ func LoadConfig() (*AppConfig, error) {
 		TranscriptOrder:       getEnv("YOUTUBE_TRANSCRIPT_ORDER", "ytapi,tactiq"),
 		TwitterUsername:       os.Getenv("TWITTER_USERNAME"),
 		TwitterPassword:       os.Getenv("TWITTER_PASSWORD"),
+		TranscriptServiceURL:  getEnv("TRANSCRIPT_SERVICE_URL", "http://localhost:8000"),
 
 		// Cache configuration
 		CacheType:     getEnv("CACHE_TYPE", "memory"),
@@ -78,7 +80,6 @@ func LoadConfig() (*AppConfig, error) {
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
 		MaxConcurrentExtractions: getEnvAsInt("MAX_CONCURRENT_EXTRACTIONS", getEnvAsInt("BROWSER_POOL_SIZE", 5)*2),
 		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 5),
-		PythonPoolSize:           getEnvAsInt("PYTHON_POOL_SIZE", 5),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -134,10 +135,6 @@ func (c *AppConfig) Validate() error {
 
 	if c.BrowserPoolSize <= 0 {
 		return fmt.Errorf("invalid value for BROWSER_POOL_SIZE: %d (must be greater than 0)", c.BrowserPoolSize)
-	}
-
-	if c.PythonPoolSize <= 0 {
-		return fmt.Errorf("invalid value for PYTHON_POOL_SIZE: %d (must be greater than 0)", c.PythonPoolSize)
 	}
 
 	return nil

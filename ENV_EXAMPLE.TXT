@@ -45,6 +45,9 @@ SERPER_API_URL=https://google.serper.dev/search
 # Get your API key at: https://console.developers.google.com/
 YOUTUBE_API_KEY=your_youtube_api_key_here
 
+# URL for the Python transcript microservice
+TRANSCRIPT_SERVICE_URL=http://localhost:8000
+
 # Order of transcript extraction methods (comma-separated)
 # Valid entries: ytapi (youtube-transcript-api), tactiq
 # Example prioritizing Tactiq first:
