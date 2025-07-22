@@ -39,7 +39,7 @@ type AppConfig struct {
 	RedisDB        int
 	SearchCacheTTL time.Duration
 	ContentCacheTTL time.Duration
-	HTTPWorkerPoolSize       int // ADD THIS
+	HTTPWorkerPoolSize       int
 	BrowserPoolSize          int
 	JSExtractionTimeout      time.Duration
 }
@@ -79,10 +79,8 @@ func LoadConfig() (*AppConfig, error) {
 		RedisDB:       getEnvAsInt("REDIS_DB", 0),
 		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
 		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
-		// Set a much higher default for the I/O-bound worker pool.
 		HTTPWorkerPoolSize:       getEnvAsInt("HTTP_WORKER_POOL_SIZE", 200),
-		// The browser pool should be closer to the number of CPU cores.
-		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 4), // Default to your number of cores
+		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 4),
 		JSExtractionTimeout:      getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
 	}
 

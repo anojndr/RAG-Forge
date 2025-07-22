@@ -16,7 +16,14 @@ type Job struct {
 	Context    context.Context
 }
 
-// WorkerPool manages a pool of workers and a queue of jobs.
+// WorkerPool manages a pool of concurrent goroutines (workers) to process jobs.
+//
+// How it works:
+// 1. A fixed number of worker goroutines are started (`PoolSize`).
+// 2. Jobs are sent to a shared `JobQueue` channel.
+// 3. Each available worker pulls a job from the queue and processes it using the `Dispatcher`.
+// 4. This pattern limits the total number of concurrent operations, preventing resource exhaustion.
+// 5. The pool is gracefully shut down by closing the `JobQueue`, which terminates the worker goroutines.
 type WorkerPool struct {
 	JobQueue   chan Job
 	Dispatcher *extractor.Dispatcher

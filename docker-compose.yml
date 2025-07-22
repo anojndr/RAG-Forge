@@ -14,14 +14,34 @@ services:
       # - Increase to 80 or 100 if CPU is maxed out.
       # - Decrease to 30 if you have CPU to spare and want to minimize latency.
       - GOGC=50
+      # Set a soft memory limit for the Go runtime. It should be ~90% of the
+      # container's memory limit to leave room for the OS and non-Go memory.
+      # If your container has a 2GB limit, set this to "1800MiB".
+      - GOMEMLIMIT=1800MiB
       # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
       # For an 8-thread machine, where we assign 6 threads to this service, a value of 6 is ideal.
       - BROWSER_POOL_SIZE=6
+    mem_limit: 2g
     env_file:
       - .env
     # Pin the Go service to the first 6 CPU threads (0-5).
     # This is a Linux-only feature and gives it dedicated resources.
     cpuset: "0-5"
+    # Add this entire block for system-level network tuning
+    sysctls:
+      # Increase the number of incoming connections backlog.
+      # Helps prevent connection drops during request spikes.
+      - net.core.somaxconn=1024
+      # Allow reuse of sockets in TIME_WAIT state for new connections.
+      # Critical for high-concurrency servers to avoid ephemeral port exhaustion.
+      - net.ipv4.tcp_tw_reuse=1
+      # Increase the ephemeral port range.
+      - net.ipv4.ip_local_port_range=1024 65535
+      # Increase TCP read/write buffers.
+      - net.core.rmem_max=16777216
+      - net.core.wmem_max=16777216
+      - net.ipv4.tcp_rmem=4096 87380 16777216
+      - net.ipv4.tcp_wmem=4096 65536 16777216
     depends_on:
       - transcript-service
     command: ["./main"]
