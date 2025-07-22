@@ -58,43 +58,19 @@ func main() {
 	// Create a DNS cache
 	dnsCache := goCache.New(5*time.Minute, 10*time.Minute)
 
-	// Create a single, optimized HTTP client for all network requests
+	// Create a pool of transports. A size of 4 is a good start.
+	// This gives you an effective MaxIdleConnsPerHost of 4 * 400 = 1600.
+	transportPool := createTransportPool(4, dnsCache)
+	transportCounter := 0
+	var transportMu sync.Mutex
+
+	// Create a single HTTP client that dynamically selects a transport
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second, // A global timeout is a good safety net
-		Transport: &http.Transport{
-			// Custom dialer with DNS caching
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-
-				// Check cache for the IP address
-				if cachedIP, found := dnsCache.Get(host); found {
-					return net.Dial(network, net.JoinHostPort(cachedIP.(string), port))
-				}
-
-				// If not in cache, resolve and cache it
-				ips, err := net.LookupHost(host)
-				if err != nil {
-					return nil, err
-				}
-
-				ip := ips[0] // Use the first resolved IP
-				dnsCache.Set(host, ip, goCache.DefaultExpiration)
-
-				return net.Dial(network, net.JoinHostPort(ip, port))
-			},
-			MaxIdleConns:        2000, // Increased for high concurrency
-			MaxIdleConnsPerHost: 400,  // Increased
-			// How long to keep an idle connection alive.
-			IdleConnTimeout: 90 * time.Second,
-			// Timeout for the TLS handshake.
-			TLSHandshakeTimeout: 10 * time.Second,
-			// A good default.
-			ExpectContinueTimeout: 1 * time.Second,
-			// A great choice to have, keep this.
-			ForceAttemptHTTP2: true,
+		Timeout: 30 * time.Second,
+		Transport: &roundRobinTransport{ // Use a custom RoundTripper
+			transports: transportPool,
+			counter:    &transportCounter,
+			mu:         &transportMu,
 		},
 	}
 
@@ -206,6 +182,57 @@ func main() {
 	}
 
 	slog.Info("Server exited gracefully")
+}
+
+// Custom RoundTripper to select a transport from the pool
+type roundRobinTransport struct {
+	transports []*http.Transport
+	counter    *int
+	mu         *sync.Mutex
+}
+
+func (r *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	transportIndex := *r.counter % len(r.transports)
+	*r.counter++
+	r.mu.Unlock()
+
+	return r.transports[transportIndex].RoundTrip(req)
+}
+
+// Create a pool of transports
+func createTransportPool(size int, dnsCache *goCache.Cache) []*http.Transport {
+	transports := make([]*http.Transport, size)
+	for i := 0; i < size; i++ {
+		transports[i] = &http.Transport{
+			// The DialContext function is now shared across transports,
+			// which is fine as the underlying DNS cache is thread-safe.
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// ... (keep your existing DNS caching logic here)
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				if cachedIP, found := dnsCache.Get(host); found {
+					return net.Dial(network, net.JoinHostPort(cachedIP.(string), port))
+				}
+				ips, err := net.LookupHost(host)
+				if err != nil {
+					return nil, err
+				}
+				ip := ips[0]
+				dnsCache.Set(host, ip, goCache.DefaultExpiration)
+				return net.Dial(network, net.JoinHostPort(ip, port))
+			},
+			MaxIdleConns:        2000,
+			MaxIdleConnsPerHost: 400, // This limit is now per-transport
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ForceAttemptHTTP2:     true,
+		}
+	}
+	return transports
 }
 
 func requestIDMiddleware(next http.Handler) http.Handler {
