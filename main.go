@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"web-search-api-for-llms/internal/api"
@@ -61,16 +62,14 @@ func main() {
 	// Create a pool of transports. A size of 4 is a good start.
 	// This gives you an effective MaxIdleConnsPerHost of 4 * 400 = 1600.
 	transportPool := createTransportPool(4, dnsCache)
-	transportCounter := 0
-	var transportMu sync.Mutex
+	var transportCounter uint32
 
 	// Create a single HTTP client that dynamically selects a transport
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
-		Transport: &roundRobinTransport{ // Use a custom RoundTripper
+		Transport: &roundRobinTransport{
 			transports: transportPool,
 			counter:    &transportCounter,
-			mu:         &transportMu,
 		},
 	}
 
@@ -187,15 +186,12 @@ func main() {
 // Custom RoundTripper to select a transport from the pool
 type roundRobinTransport struct {
 	transports []*http.Transport
-	counter    *int
-	mu         *sync.Mutex
+	counter    *uint32
 }
 
 func (r *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.mu.Lock()
-	transportIndex := *r.counter % len(r.transports)
-	*r.counter++
-	r.mu.Unlock()
+	count := atomic.AddUint32(r.counter, 1)
+	transportIndex := int(count) % len(r.transports)
 
 	return r.transports[transportIndex].RoundTrip(req)
 }
