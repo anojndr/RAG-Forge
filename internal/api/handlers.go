@@ -251,11 +251,15 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	}()
 
 	// --- Aggregate and respond ---
-	// --- Aggregate and respond ---
 	var finalResults []extractor.ExtractedResult
+	var resultsToPool []*extractor.ExtractedResult // Keep track of objects to be pooled
 	for res := range resultsChan {
 		finalResults = append(finalResults, *res)
-		// Put the object back in the pool after copying its data
+		resultsToPool = append(resultsToPool, res) // Add the pointer to our list
+	}
+
+	// Now, after we've copied the data into finalResults, we can safely pool all the objects.
+	for _, res := range resultsToPool {
 		res.Reset()
 		extractor.ExtractedResultPool.Put(res)
 	}
