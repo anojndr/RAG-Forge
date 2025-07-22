@@ -71,7 +71,13 @@ func NewClient(appConfig *config.AppConfig, client *http.Client) *Client {
 	}
 }
 
-// fetchSerperResults fetches search results from the Serper.dev API.
+// Add this struct definition
+type serperRequestPayload struct {
+	Query string `json:"q"`
+	Num   int    `json:"num"`
+}
+
+// In fetchSerperResults function
 func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResults int) ([]string, error) {
 	if c.config.SerperAPIKey == "" {
 		slog.Warn("Serper API key is not configured. Skipping Serper search.")
@@ -94,10 +100,10 @@ func (c *Client) fetchSerperResults(ctx context.Context, query string, maxResult
 		numResultsToRequest = 30 // Or adjust as per Serper's typical pagination/result counts
 	}
 
-	payload := map[string]interface{}{
-		"q":   query,
-		"num": numResultsToRequest,
-		// Potentially add other params like "gl" (country), "hl" (language)
+	// Replace the map with the struct
+	payload := serperRequestPayload{
+		Query: query,
+		Num:   numResultsToRequest,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

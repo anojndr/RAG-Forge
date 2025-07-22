@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"web-search-api-for-llms/internal/browser"
@@ -364,9 +365,15 @@ func (sh *SearchHandler) respondWithError(w http.ResponseWriter, code int, messa
 // ... (Helper functions like getSearchCacheKey, getContentCacheKey, checkIfErrorIsPermanent)
 func getSearchCacheKey(query string) string { return "search_cache:" + query }
 func getContentCacheKey(url string, maxChars *int) string {
-	key := "content_cache:" + url
-	if maxChars != nil { key = fmt.Sprintf("%s:%d", key, *maxChars) }
-	return key
+	var sb strings.Builder
+	sb.WriteString("content_cache:")
+	sb.WriteString(url)
+	if maxChars != nil {
+		sb.WriteString(":")
+		// A small optimization: convert int to string without fmt.
+		sb.WriteString(strconv.Itoa(*maxChars))
+	}
+	return sb.String()
 }
 func checkIfErrorIsPermanent(err error) bool {
 	if err == nil { return false }
