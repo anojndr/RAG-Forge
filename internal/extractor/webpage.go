@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -61,7 +62,7 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int, r
 	c.OnError(func(r *colly.Response, err error) {
 		errMsg := fmt.Sprintf("Colly request failed: status_code=%d, error=%v", r.StatusCode, err)
 		logger.LogError("WebpageExtractor: Error scraping", "url", url, "error", errMsg)
-		collyErr = fmt.Errorf(errMsg)
+		collyErr = errors.New(errMsg)
 	})
 
 	c.OnScraped(func(r *colly.Response) {

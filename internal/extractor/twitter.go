@@ -127,7 +127,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 
 	// Check if we have Twitter credentials
 	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
-		return fmt.Errorf("Twitter credentials not configured")
+		return fmt.Errorf("twitter credentials not configured")
 	}
 
 	if isProfileURL(targetURL) {

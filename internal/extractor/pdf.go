@@ -41,7 +41,11 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int, resul
 	if err != nil {
 		return fmt.Errorf("failed to download content from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("Failed to close response body", "url", url, "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed for %s with status %s", url, resp.Status)

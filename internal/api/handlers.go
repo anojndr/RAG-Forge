@@ -190,7 +190,11 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		maxChars = reqPayload.MaxCharPerURL
 		logger.Info("Handling extract request", "url_count", len(urls))
 	}
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			logger.Warn("Failed to close request body", "error", err)
+		}
+	}()
 
 	// --- Batched Cache Lookup ---
 	resultsChan := make(chan *extractor.ExtractedResult, len(urls))
@@ -262,7 +266,11 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	if len(itemsToCache) > 0 {
 		logger.Debug("Performing batched cache write", "item_count", len(itemsToCache))
 		// Use a background context for the cache write so it doesn't block the response
-		go sh.Cache.MSet(context.Background(), itemsToCache, sh.Config.ContentCacheTTL)
+		go func() {
+			if err := sh.Cache.MSet(context.Background(), itemsToCache, sh.Config.ContentCacheTTL); err != nil {
+				slog.Error("Failed to cache items", "error", err)
+			}
+		}()
 	}
 
 	// Now, put all the objects back into the pool

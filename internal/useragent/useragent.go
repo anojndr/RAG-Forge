@@ -3,7 +3,6 @@ package useragent
 import (
 	"math/rand"
 	"strings"
-	"time"
 )
 
 var (
@@ -45,7 +44,8 @@ var (
 )
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
+	// rand.Seed is deprecated in Go 1.20 and later. The global rand is automatically seeded.
+	// The line `rand.Seed(time.Now().UnixNano())` was removed.
 	for _, ua := range userAgents {
 		if strings.Contains(ua, "Mobi") {
 			mobileAgents = append(mobileAgents, ua)

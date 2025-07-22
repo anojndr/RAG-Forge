@@ -48,7 +48,11 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int,
 
 	// Intercept and block non-essential requests
 	router := page.HijackRequests()
-	defer router.Stop()
+	defer func() {
+		if err := router.Stop(); err != nil {
+			slog.Warn("Failed to stop hijack router", "error", err)
+		}
+	}()
 
 	router.MustAdd("*", func(ctx *rod.Hijack) {
 		// Allow only document and data-fetching requests

@@ -147,19 +147,3 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType string, resul
 }
 
 
-// isYouTubePlaylist checks if a given URL is a YouTube playlist.
-func isYouTubePlaylist(parsedURL *url.URL) bool {
-	// A URL is a playlist if the path contains "/playlist"
-	if strings.Contains(parsedURL.Path, "/playlist") {
-		return true
-	}
-
-	// A URL is also a playlist if it has a "list" query parameter
-	// but not a "v" (video) parameter.
-	queryParams := parsedURL.Query()
-	if queryParams.Get("list") != "" && queryParams.Get("v") == "" {
-		return true
-	}
-
-	return false
-}

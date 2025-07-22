@@ -29,7 +29,7 @@ func NewShardedMemoryCache(defaultExpiration, cleanupInterval time.Duration) *Sh
 func (c *ShardedMemoryCache) getShard(key string) *cache.Cache {
 	// Use xxhash for faster hashing
 	hasher := xxhash.New()
-	hasher.Write([]byte(key))
+	_, _ = hasher.Write([]byte(key))
 	return c.shards[hasher.Sum64()&(shardCount-1)]
 }
 
@@ -68,7 +68,7 @@ func (c *ShardedMemoryCache) MGetExtractedResults(ctx context.Context, keys []st
 	keysByShard := make([][]string, shardCount)
 	for _, key := range keys {
 		hasher := xxhash.New()
-		hasher.Write([]byte(key))
+		_, _ = hasher.Write([]byte(key))
 		shardIndex := hasher.Sum64() & (shardCount - 1)
 		keysByShard[shardIndex] = append(keysByShard[shardIndex], key)
 	}

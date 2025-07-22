@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -196,7 +197,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
+		return errors.New(strings.Join(errs, "; "))
 	}
 
 	return nil
@@ -439,7 +440,11 @@ func (e *YouTubeExtractor) extractTranscriptWithYTAPI(ctx context.Context, video
 	if err != nil {
 		return "", fmt.Errorf("failed to call transcript service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("YouTubeExtractor: Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		var errorResponse struct {

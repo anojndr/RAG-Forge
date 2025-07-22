@@ -256,7 +256,11 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string, result *Extracte
 	if err != nil {
 		return fmt.Errorf("failed to make API request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("API request failed with status: %d", resp.StatusCode)
@@ -428,7 +432,11 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string, result *Extracte
 	if err != nil {
 		return fmt.Errorf("failed to make subreddit request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("subreddit request failed with status: %d", resp.StatusCode)
@@ -485,7 +493,11 @@ func (e *RedditExtractor) fetchUserPosts(username string, result *ExtractedResul
 	if err != nil {
 		return fmt.Errorf("failed to make user request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("user request failed with status: %d", resp.StatusCode)
@@ -545,7 +557,11 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int, result *
 	if err != nil {
 		return fmt.Errorf("failed to make JSON request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("JSON request failed with status: %d", resp.StatusCode)
@@ -642,7 +658,7 @@ func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *i
 
 	case RedditSearchURL:
 		// Handle search results (not implemented yet)
-		return fmt.Errorf("Reddit search URLs are not yet supported")
+		return fmt.Errorf("reddit search URLs are not yet supported")
 
 	default:
 		return fmt.Errorf("unsupported Reddit URL type")
