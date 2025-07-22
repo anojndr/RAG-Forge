@@ -68,13 +68,13 @@ func (c *RedisCache) MGetExtractedResults(ctx context.Context, keys []string) (m
 			continue // Key not found
 		}
 		if strVal, ok := val.(string); ok && strVal != "" {
-			// Use the pooled Get to avoid allocation inside the loop
+			// Use the pool to avoid allocation inside the loop
 			pooledResult := extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
 			if err := json.Unmarshal([]byte(strVal), pooledResult); err == nil {
 				results[keys[i]] = pooledResult
 			} else {
 				slog.Warn("RedisCache: MGET failed to unmarshal ExtractedResult", "key", keys[i], "error", err)
-				// Put back in the pool if unmarshal fails
+				// IMPORTANT: Put back in the pool if unmarshal fails
 				extractor.ExtractedResultPool.Put(pooledResult)
 			}
 		}
