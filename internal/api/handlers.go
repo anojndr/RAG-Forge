@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/cache"
 	"web-search-api-for-llms/internal/config"
@@ -227,20 +226,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		go func(job worker.Job) {
 			defer wg.Done()
 			result := <-job.ResultChan
-			cacheKey := getContentCacheKey(job.URL, job.MaxChars)
-			
-			if result.Error != "" {
-				err := fmt.Errorf(result.Error)
-				// Cache permanent errors for a longer duration
-				if checkIfErrorIsPermanent(err) {
-					sh.Cache.Set(r.Context(), cacheKey, result, 5*time.Minute)
-				} else {
-					// Cache transient errors (like timeouts, 503s) for a very short time
-					sh.Cache.Set(r.Context(), cacheKey, result, 30*time.Second)
-				}
-			} else {
-				sh.Cache.Set(r.Context(), cacheKey, result, sh.Config.ContentCacheTTL)
-			}
+			// We no longer set here. We aggregate and set later.
 			resultsChan <- result
 		}(job)
 	}
@@ -252,13 +238,33 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 
 	// --- Aggregate and respond ---
 	var finalResults []extractor.ExtractedResult
-	var resultsToPool []*extractor.ExtractedResult // Keep track of objects to be pooled
+	resultsToPool := make([]*extractor.ExtractedResult, 0, len(urls))
+	itemsToCache := make(map[string]interface{}) // Map to hold items for MSet
+
 	for res := range resultsChan {
 		finalResults = append(finalResults, *res)
-		resultsToPool = append(resultsToPool, res) // Add the pointer to our list
+		resultsToPool = append(resultsToPool, res) // For putting back in the pool later
+
+		// Check if the result was a cache miss and should be cached now.
+		cacheKey := getContentCacheKey(res.URL, maxChars)
+		if res.Error != "" {
+			// Cache permanent errors for a longer duration
+			if checkIfErrorIsPermanent(fmt.Errorf(res.Error)) {
+				itemsToCache[cacheKey] = res
+			}
+		} else if res.ProcessedSuccessfully {
+			itemsToCache[cacheKey] = res
+		}
 	}
 
-	// Now, after we've copied the data into finalResults, we can safely pool all the objects.
+	// Perform a single, pipelined cache write for all successful results
+	if len(itemsToCache) > 0 {
+		logger.Debug("Performing batched cache write", "item_count", len(itemsToCache))
+		// Use a background context for the cache write so it doesn't block the response
+		go sh.Cache.MSet(context.Background(), itemsToCache, sh.Config.ContentCacheTTL)
+	}
+
+	// Now, pool all the objects
 	for _, res := range resultsToPool {
 		res.Reset()
 		extractor.ExtractedResultPool.Put(res)

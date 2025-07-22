@@ -110,3 +110,26 @@ func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, dur
 		slog.Warn("Redis SET failed", "key", key, "error", err)
 	}
 }
+// MSet is a batched/pipelined SET for Redis.
+func (c *RedisCache) MSet(ctx context.Context, items map[string]interface{}, duration time.Duration) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	pipe := c.client.Pipeline()
+	for key, value := range items {
+		jsonBytes, err := json.Marshal(value)
+		if err != nil {
+			slog.Warn("RedisCache MSet: Failed to marshal value, skipping item", "key", key, "error", err)
+			continue
+		}
+		pipe.Set(ctx, key, jsonBytes, duration)
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		slog.Warn("Redis Pipelined MSET failed", "error", err)
+		return err
+	}
+	return nil
+}

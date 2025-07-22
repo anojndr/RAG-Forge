@@ -13,4 +13,5 @@ type Cache interface {
 	Set(ctx context.Context, key string, value interface{}, duration time.Duration)
 	// Add this new method for batched lookups
 	MGetExtractedResults(ctx context.Context, keys []string) (map[string]*extractor.ExtractedResult, error)
+	MSet(ctx context.Context, items map[string]interface{}, duration time.Duration) error
 }

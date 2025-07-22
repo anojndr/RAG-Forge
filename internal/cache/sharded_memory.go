@@ -99,3 +99,13 @@ func (c *ShardedMemoryCache) MGetExtractedResults(ctx context.Context, keys []st
 	wg.Wait()
 	return resultsMap, nil
 }
+// MSet provides a batched write for the sharded in-memory cache.
+// Note: This is not a true pipelined operation like in Redis, but it satisfies the interface.
+func (c *ShardedMemoryCache) MSet(ctx context.Context, items map[string]interface{}, duration time.Duration) error {
+	// In-memory cache doesn't have a pipeline, so we just iterate.
+	// This is still better than calling Set individually from the handler.
+	for key, value := range items {
+		c.Set(ctx, key, value, duration)
+	}
+	return nil
+}
