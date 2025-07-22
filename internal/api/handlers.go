@@ -46,8 +46,8 @@ type FinalResponsePayload struct {
 		MaxResultsRequested int    `json:"max_results_requested"`
 		ActualResultsFound  int    `json:"actual_results_found"`
 	} `json:"query_details"`
-	Results []extractor.ExtractedResult `json:"results"`
-	Error   string                      `json:"error,omitempty"`
+	Results []*extractor.ExtractedResult `json:"results"`
+	Error   string                       `json:"error,omitempty"`
 }
 type ExtractRequestPayload struct {
 	URLs          []string `json:"urls"`
@@ -58,8 +58,8 @@ type ExtractResponsePayload struct {
 		URLsRequested int `json:"urls_requested"`
 		URLsProcessed int `json:"urls_processed"`
 	} `json:"request_details"`
-	Results []extractor.ExtractedResult `json:"results"`
-	Error   string                      `json:"error,omitempty"`
+	Results []*extractor.ExtractedResult `json:"results"`
+	Error   string                       `json:"error,omitempty"`
 }
 
 // SearchHandler holds dependencies for the search handler.
@@ -238,13 +238,13 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	}()
 
 	// --- Aggregate and respond ---
-	var finalResults []extractor.ExtractedResult
-	resultsToPool := make([]*extractor.ExtractedResult, 0, len(urls))
-	itemsToCache := make(map[string]interface{}) // Map to hold items for MSet
+	var finalResults []*extractor.ExtractedResult // <-- Change to slice of pointers
+	itemsToCache := make(map[string]interface{})   // Map to hold items for MSet
 
+	// The rest of the aggregation logic can remain mostly the same
 	for res := range resultsChan {
-		finalResults = append(finalResults, *res)
-		resultsToPool = append(resultsToPool, res) // For putting back in the pool later
+		finalResults = append(finalResults, res) // Append the pointer directly
+		// No need to add to a separate resultsToPool slice anymore
 
 		// Check if the result was a cache miss and should be cached now.
 		cacheKey := getContentCacheKey(res.URL, maxChars)
@@ -265,8 +265,8 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		go sh.Cache.MSet(context.Background(), itemsToCache, sh.Config.ContentCacheTTL)
 	}
 
-	// Now, pool all the objects
-	for _, res := range resultsToPool {
+	// Now, put all the objects back into the pool
+	for _, res := range finalResults {
 		res.Reset()
 		extractor.ExtractedResultPool.Put(res)
 	}
