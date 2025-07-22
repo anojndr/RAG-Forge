@@ -14,10 +14,9 @@ services:
       # - Increase to 80 or 100 if CPU is maxed out.
       # - Decrease to 30 if you have CPU to spare and want to minimize latency.
       - GOGC=50
-      # Set a soft memory limit for the Go runtime. It should be ~90% of the
-      # container's memory limit to leave room for the OS and non-Go memory.
-      # If your container has a 2GB limit, set this to "1800MiB".
-      - GOMEMLIMIT=1800MiB
+      # Lower this to leave more memory for the browser processes, which are not
+      # managed by the Go runtime's memory limiter.
+      - GOMEMLIMIT=1000MiB
       # For CPU-bound browser tasks, this should be tuned to the number of available CPU threads.
       # For an 8-thread machine, where we assign 6 threads to this service, a value of 6 is ideal.
       - BROWSER_POOL_SIZE=6
