@@ -25,6 +25,9 @@ func NewRedisCache(addr, password string, db int) *RedisCache {
 		Password: password,
 		DB:       db,
 	})
+	// Add connection pooling options for high concurrency
+	rdb.Options().PoolSize = 500
+	rdb.Options().MinIdleConns = 50
 	return &RedisCache{client: rdb}
 }
 
