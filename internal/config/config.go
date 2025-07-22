@@ -59,7 +59,7 @@ func LoadConfig() (*AppConfig, error) {
 		RedditClientID:        os.Getenv("REDDIT_CLIENT_ID"),
 		RedditClientSecret:    os.Getenv("REDDIT_CLIENT_SECRET"),
 		RedditUserAgent:       os.Getenv("REDDIT_USER_AGENT"),
-		SearxNGURL:            getEnv("SEARXNG_URL", "http://localhost:18088"),
+		SearxNGURL:            getEnv("SEARXNG_URL", "http://127.0.0.1:18088"),
 		SerperAPIKey:          os.Getenv("SERPER_API_KEY"),
 		SerperAPIURL:          getEnv("SERPER_API_URL", "https://google.serper.dev/search"),
 		MainSearchEngine:      getEnv("MAIN_SEARCH_ENGINE", "searxng"),
