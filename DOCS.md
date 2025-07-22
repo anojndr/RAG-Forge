@@ -258,7 +258,7 @@ RAG-Forge implements a two-level caching strategy to improve performance and red
 1.  **Search Cache:** Caches the list of URLs returned by a `/search` query. TTL is configured via `SEARCH_CACHE_TTL`.
 2.  **Content Cache:** Caches the `ExtractedResult` object for a specific URL. TTL is configured via `CONTENT_CACHE_TTL`.
 
-The cache can be run in-memory (`CACHE_TYPE=memory`) or with Redis (`CACHE_TYPE=redis`) for persistence across restarts.
+The cache can be run using a high-performance, sharded in-memory cache (`CACHE_TYPE=memory`) or with Redis (`CACHE_TYPE=redis`) for persistence across restarts.
 
 ## Live Demo & Example Integration
 
