@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"web-search-api-for-llms/internal/worker"
 
 	"github.com/google/uuid"
+	goCache "github.com/patrickmn/go-cache"
 	_ "go.uber.org/automaxprocs"
 )
 
@@ -52,16 +54,38 @@ func main() {
 	}
 	defer browserPool.Cleanup()
 
+	// Create a DNS cache
+	dnsCache := goCache.New(5*time.Minute, 10*time.Minute)
+
 	// Create a single, optimized HTTP client for all network requests
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second, // A global timeout is a good safety net
 		Transport: &http.Transport{
-			// This is the total number of idle connections across all hosts.
-			// With thousands of users, this should be high.
-			MaxIdleConns: 1000,
-			// This is the number of idle connections to a single host.
-			// Many requests will go to the same domains (google, youtube, reddit).
-			MaxIdleConnsPerHost: 200,
+			// Custom dialer with DNS caching
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+
+				// Check cache for the IP address
+				if cachedIP, found := dnsCache.Get(host); found {
+					return net.Dial(network, net.JoinHostPort(cachedIP.(string), port))
+				}
+
+				// If not in cache, resolve and cache it
+				ips, err := net.LookupHost(host)
+				if err != nil {
+					return nil, err
+				}
+
+				ip := ips[0] // Use the first resolved IP
+				dnsCache.Set(host, ip, goCache.DefaultExpiration)
+
+				return net.Dial(network, net.JoinHostPort(ip, port))
+			},
+			MaxIdleConns:        2000, // Increased for high concurrency
+			MaxIdleConnsPerHost: 400,  // Increased
 			// How long to keep an idle connection alive.
 			IdleConnTimeout: 90 * time.Second,
 			// Timeout for the TLS handshake.
