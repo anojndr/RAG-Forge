@@ -273,21 +273,21 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		}()
 	}
 
-	// Now, put all the objects back into the pool
-	for _, res := range finalResults {
-		res.Reset()
-		extractor.ExtractedResultPool.Put(res)
-	}
-
 	logger.Info("Finished all extractions", "count", len(finalResults))
 	if r.Context().Err() != nil {
 		logger.Warn("Context cancelled, not writing response", "path", r.URL.Path)
+		// Still pool the objects even on context cancellation to prevent leaks
+		for _, res := range finalResults {
+			res.Reset()
+			extractor.ExtractedResultPool.Put(res)
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
+	// Create and send the response FIRST
 	if endpoint == "/search" {
 		resp := FinalResponsePayload{Results: finalResults}
 		resp.QueryDetails.Query = query
@@ -303,6 +303,12 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			logger.Error("Error encoding extract response", "error", err)
 		}
+	}
+
+	// NOW, put all the objects back into the pool AFTER the response is sent
+	for _, res := range finalResults {
+		res.Reset()
+		extractor.ExtractedResultPool.Put(res)
 	}
 }
 
