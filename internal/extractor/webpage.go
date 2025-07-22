@@ -28,12 +28,9 @@ func NewWebpageExtractor(appConfig *config.AppConfig, client *http.Client) *Webp
 }
 
 // Extract uses Colly to scrape visible text content and title from a webpage.
-func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("WebpageExtractor: Starting extraction", "url", url)
-	result := &ExtractedResult{
-		URL:        url,
-		SourceType: "webpage",
-	}
+	result.SourceType = "webpage"
 
 	c := colly.NewCollector(
 		colly.MaxDepth(1),
@@ -45,96 +42,85 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int) (
 
 	var pageTitle string
 	var textContentBuilder strings.Builder
+	var collyErr error
 
 	c.OnHTML("title", func(h *colly.HTMLElement) {
 		pageTitle = strings.TrimSpace(h.Text)
 	})
 
-	c.OnHTML("script, style, noscript, iframe, nav, footer, header", func(h *colly.HTMLElement) {
+	// Remove common non-content elements before extracting text
+	c.OnHTML("script, style, noscript, iframe, nav, footer, header, aside, form, menu", func(h *colly.HTMLElement) {
 		h.DOM.Remove()
 	})
 
 	c.OnHTML("body", func(h *colly.HTMLElement) {
-		textContentBuilder.WriteString(h.Text)
+		// A more robust way to get clean text content
+		textContentBuilder.WriteString(h.DOM.Text())
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
 		errMsg := fmt.Sprintf("Colly request failed: status_code=%d, error=%v", r.StatusCode, err)
-		result.Error = errMsg
-		logger.LogError("WebpageExtractor: Error scraping %s: %s", url, errMsg)
+		logger.LogError("WebpageExtractor: Error scraping", "url", url, "error", errMsg)
+		collyErr = fmt.Errorf(errMsg)
 	})
 
 	c.OnScraped(func(r *colly.Response) {
 		slog.Info("WebpageExtractor: Finished scraping", "url", url, "title", pageTitle, "text_length", textContentBuilder.Len())
 	})
 
-	err := c.Visit(url)
-	if err != nil {
-		if result.Error == "" {
-			result.Error = fmt.Sprintf("failed to visit and scrape webpage: %v", err)
+	if err := c.Visit(url); err != nil {
+		if collyErr != nil {
+			return fmt.Errorf("failed to visit and scrape webpage: %w (colly error: %v)", err, collyErr)
 		}
-		logger.LogError("WebpageExtractor: Visit error for %s: %v", url, err)
-		return result, err
+		return fmt.Errorf("failed to visit and scrape webpage: %w", err)
 	}
 
-	if result.Error != "" {
-		return result, fmt.Errorf(result.Error)
+	if collyErr != nil {
+		return collyErr
+	}
+
+	textContent := strings.TrimSpace(textContentBuilder.String())
+
+	// Truncate if necessary
+	if maxChars != nil && len(textContent) > *maxChars {
+		textContent = textContent[:*maxChars]
 	}
 
 	result.ProcessedSuccessfully = true
 	result.Data = WebpageData{
-		TextContent: strings.TrimSpace(textContentBuilder.String()),
+		TextContent: textContent,
 		Title:       pageTitle,
 	}
 
-	if maxChars != nil {
-		if data, ok := result.Data.(WebpageData); ok {
-			if len(data.TextContent) > *maxChars {
-				data.TextContent = data.TextContent[:*maxChars]
-				result.Data = data
-			}
-		}
-	}
-
-	return result, nil
+	return nil
 }
 
 // ExtractFromContent extracts content from a pre-fetched byte slice.
-func (e *WebpageExtractor) ExtractFromContent(url string, content []byte, maxChars *int) (*ExtractedResult, error) {
+func (e *WebpageExtractor) ExtractFromContent(url string, content []byte, maxChars *int, result *ExtractedResult) error {
 	slog.Info("WebpageExtractor: Starting extraction from content", "url", url)
-	result := &ExtractedResult{
-		URL:        url,
-		SourceType: "webpage",
-	}
-
-	var pageTitle string
-	var textContentBuilder strings.Builder
+	result.SourceType = "webpage"
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(content)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse content: %w", err)
+		return fmt.Errorf("failed to parse content: %w", err)
 	}
 
-	pageTitle = strings.TrimSpace(doc.Find("title").Text())
-	doc.Find("script, style, noscript, iframe, nav, footer, header").Remove()
-	textContentBuilder.WriteString(doc.Find("body").Text())
+	pageTitle := strings.TrimSpace(doc.Find("title").Text())
+	// Remove common non-content elements before extracting text
+	doc.Find("script, style, noscript, iframe, nav, footer, header, aside, form, menu").Remove()
+	textContent := strings.TrimSpace(doc.Find("body").Text())
+
+	// Truncate if necessary
+	if maxChars != nil && len(textContent) > *maxChars {
+		textContent = textContent[:*maxChars]
+	}
 
 	result.ProcessedSuccessfully = true
 	result.Data = WebpageData{
-		TextContent: strings.TrimSpace(textContentBuilder.String()),
+		TextContent: textContent,
 		Title:       pageTitle,
 	}
 
-	slog.Info("WebpageExtractor: Finished extracting from content", "url", url, "title", pageTitle, "text_length", textContentBuilder.Len())
-
-	if maxChars != nil {
-		if data, ok := result.Data.(WebpageData); ok {
-			if len(data.TextContent) > *maxChars {
-				data.TextContent = data.TextContent[:*maxChars]
-				result.Data = data
-			}
-		}
-	}
-
-	return result, nil
+	slog.Info("WebpageExtractor: Finished extracting from content", "url", url, "title", pageTitle, "text_length", len(textContent))
+	return nil
 }

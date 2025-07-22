@@ -94,7 +94,7 @@ type TwitterComment struct {
 // This interface is kept small and focused on a single responsibility.
 type ContentExtractor interface {
 	// Extract processes a URL and returns extracted content or an error
-	Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error)
+	Extract(url string, endpoint string, maxChars *int, result *ExtractedResult) error
 }
 
 // URLClassifier defines the interface for URL classification

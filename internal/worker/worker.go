@@ -47,12 +47,14 @@ func (wp *WorkerPool) Start() {
 			slog.Debug("Worker started", "worker_id", workerID)
 			for job := range wp.JobQueue {
 				slog.Debug("Worker processing job", "worker_id", workerID, "url", job.URL)
-				result, err := wp.Dispatcher.DispatchAndExtractWithContext(job.URL, job.Endpoint, job.MaxChars)
+				// Get a result from the pool AT THE START of the job.
+				result := extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
+				result.Reset() // Reset before use
+				result.URL = job.URL
+
+				// Pass the pooled result to the dispatcher.
+				err := wp.Dispatcher.DispatchAndExtractWithContext(job.URL, job.Endpoint, job.MaxChars, result)
 				if err != nil {
-					// Get a result from the pool instead of allocating
-					result = extractor.ExtractedResultPool.Get().(*extractor.ExtractedResult)
-				                result.Reset() // Important: reset before use
-					result.URL = job.URL
 					result.ProcessedSuccessfully = false
 					result.Error = err.Error()
 				}

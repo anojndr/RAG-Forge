@@ -41,40 +41,34 @@ func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*You
 }
 
 // Extract determines if the URL is a video or playlist and calls the appropriate handler.
-func (e *YouTubeExtractor) Extract(videoURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *YouTubeExtractor) Extract(videoURL string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("YouTubeExtractor: Starting extraction", "url", videoURL)
 
 	if playlistID := extractPlaylistID(videoURL); playlistID != "" {
-		return e.extractPlaylist(videoURL, playlistID, maxChars)
+		return e.extractPlaylist(videoURL, playlistID, maxChars, result)
 	}
 
 	if videoID := extractVideoID(videoURL); videoID != "" {
-		return e.extractVideo(videoURL, videoID, maxChars)
+		return e.extractVideo(videoURL, videoID, maxChars, result)
 	}
 
-	result := &ExtractedResult{
-		URL:                   videoURL,
-		SourceType:            "youtube",
-		ProcessedSuccessfully: false,
-		Error:                 "could not extract video ID or playlist ID from URL",
-	}
+	result.SourceType = "youtube"
+	result.Error = "could not extract video ID or playlist ID from URL"
 	logger.LogError("YouTubeExtractor: Error for %s: %s", videoURL, result.Error)
-	return result, fmt.Errorf(result.Error)
+	return fmt.Errorf(result.Error)
 }
 
 // extractVideo fetches title, channel, top comments, and transcript for a single YouTube video.
-func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChars *int) (*ExtractedResult, error) {
+func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("YouTubeExtractor: Extracted Video ID", "video_id", videoID, "url", videoURL)
-	result := &ExtractedResult{
-		URL:        videoURL,
-		SourceType: "youtube",
-	}
+	result.SourceType = "youtube"
 
 	var videoTitle, channelName string
 	var commentsData []interface{}
 	var transcriptText string
 	var wg sync.WaitGroup
 	var errs []string
+	var errsMutex sync.Mutex
 
 	// 1. Fetch Video Details (Title, Channel)
 	wg.Add(1)
@@ -83,8 +77,9 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		call := e.youtubeService.Videos.List([]string{"snippet"}).Id(videoID)
 		resp, err := call.Do()
 		if err != nil {
-			logger.LogError("YouTubeExtractor: Error fetching video details for %s: %v", videoID, err)
+			errsMutex.Lock()
 			errs = append(errs, fmt.Sprintf("youtube api video details: %v", err))
+			errsMutex.Unlock()
 			return
 		}
 		if len(resp.Items) > 0 {
@@ -92,8 +87,9 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 			channelName = resp.Items[0].Snippet.ChannelTitle
 			slog.Debug("YouTubeExtractor: Fetched video details", "title", videoTitle, "channel", channelName, "video_id", videoID)
 		} else {
-			slog.Warn("YouTubeExtractor: No video details found", "video_id", videoID)
+			errsMutex.Lock()
 			errs = append(errs, "youtube api: no video details found")
+			errsMutex.Unlock()
 		}
 	}()
 
@@ -108,8 +104,9 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 
 		resp, err := call.Do()
 		if err != nil {
-			logger.LogError("YouTubeExtractor: Error fetching comments for %s: %v", videoID, err)
+			errsMutex.Lock()
 			errs = append(errs, fmt.Sprintf("youtube api comments: %v", err))
+			errsMutex.Unlock()
 			return
 		}
 		for _, item := range resp.Items {
@@ -122,7 +119,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		slog.Debug("YouTubeExtractor: Fetched comments", "count", len(commentsData), "video_id", videoID)
 	}()
 
-	// 3. Fetch Transcript using yt-dlp command line
+	// 3. Fetch Transcript
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -133,8 +130,9 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 
 		transcript, err := e.extractTranscript(ctx, videoID, videoURL)
 		if err != nil {
-			logger.LogError("YouTubeExtractor: Error extracting transcript for %s: %v", videoID, err)
+			errsMutex.Lock()
 			errs = append(errs, fmt.Sprintf("transcript: %v", err))
+			errsMutex.Unlock()
 			return
 		}
 
@@ -166,7 +164,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 	if maxChars != nil {
 		if data, ok := result.Data.(YouTubeData); ok {
 			data.Transcript = truncateText(data.Transcript, *maxChars)
-			
+
 			// Truncate comments as well
 			remainingChars := *maxChars - len(data.Transcript)
 			if remainingChars > 0 {
@@ -188,7 +186,7 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 			} else {
 				data.Comments = []interface{}{}
 			}
-			
+
 			result.Data = data
 		}
 	}
@@ -197,29 +195,26 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 		slog.Info("YouTubeExtractor: Successfully extracted data", "url", videoURL)
 	}
 
-	return result, nil
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "; "))
+	}
+
+	return nil
 }
 
 // extractPlaylist fetches the title, channel, and a list of video titles from a YouTube playlist.
-func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxChars *int) (*ExtractedResult, error) {
+func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("YouTubeExtractor: Starting playlist extraction", "playlist_id", playlistID)
-	result := &ExtractedResult{
-		URL:        playlistURL,
-		SourceType: "youtube_playlist",
-	}
+	result.SourceType = "youtube_playlist"
 
 	// 1. Get Playlist Details (Title, Channel)
 	playlistCall := e.youtubeService.Playlists.List([]string{"snippet"}).Id(playlistID)
 	playlistResp, err := playlistCall.Do()
 	if err != nil {
-		result.Error = fmt.Sprintf("youtube api playlist details: %v", err)
-		logger.LogError("YouTubeExtractor: Error fetching playlist details for %s: %v", playlistID, err)
-		return result, err
+		return fmt.Errorf("youtube api playlist details: %w", err)
 	}
 	if len(playlistResp.Items) == 0 {
-		result.Error = "youtube api: no playlist details found"
-		logger.LogError("YouTubeExtractor: No playlist details found for %s", playlistID)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("youtube api: no playlist details found")
 	}
 	playlistTitle := playlistResp.Items[0].Snippet.Title
 	channelName := playlistResp.Items[0].Snippet.ChannelTitle
@@ -239,9 +234,7 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 	})
 
 	if err != nil {
-		result.Error = fmt.Sprintf("youtube api playlist items: %v", err)
-		logger.LogError("YouTubeExtractor: Error fetching playlist items for %s: %v", playlistID, err)
-		return result, err
+		return fmt.Errorf("youtube api playlist items: %w", err)
 	}
 	slog.Debug("YouTubeExtractor: Fetched video items from playlist", "count", len(videoItems), "playlist_id", playlistID)
 
@@ -256,7 +249,7 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 	// For now, we just return the list of video titles.
 	// A more advanced implementation could truncate the number of videos.
 
-	return result, nil
+	return nil
 }
 
 

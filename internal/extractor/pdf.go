@@ -2,7 +2,6 @@ package extractor
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"web-search-api-for-llms/internal/config"
-	"web-search-api-for-llms/internal/logger"
 	"web-search-api-for-llms/internal/useragent"
 )
 
@@ -28,51 +26,31 @@ func NewPDFExtractor(appConfig *config.AppConfig, client *http.Client) *PDFExtra
 }
 
 // Extract downloads a PDF from a URL and extracts its text content using a native Go library.
-func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("PDFExtractor: Starting extraction", "url", url)
-	result := &ExtractedResult{
-		URL:        url,
-		SourceType: "pdf",
-	}
+	result.SourceType = "pdf"
 
 	// 1. Download the content
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to create request: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error creating request for %s: %v", url, err)
-		return result, fmt.Errorf("pdf request creation failed for %s: %w", url, err)
+		return fmt.Errorf("failed to create request for %s: %w", url, err)
 	}
 	req.Header.Set("User-Agent", useragent.Random())
 
 	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to download content: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error downloading %s: %v", url, err)
-		return result, fmt.Errorf("download failed for %s: %w", url, err)
+		return fmt.Errorf("failed to download content from %s: %w", url, err)
 	}
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			logger.LogError("PDFExtractor: failed to close response body for %s: %v", url, err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errMsg := fmt.Sprintf("failed to download content, status: %s", resp.Status)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error downloading %s, status: %s", url, resp.Status)
-		return result, fmt.Errorf("download failed for %s with status %s", url, resp.Status)
+		return fmt.Errorf("download failed for %s with status %s", url, resp.Status)
 	}
 
 	// Add this check
 	const maxPDFSize = 20 * 1024 * 1024 // 20 MB
 	if resp.ContentLength > maxPDFSize {
-		errMsg := fmt.Sprintf("PDF file size (%d bytes) exceeds the limit of %d bytes", resp.ContentLength, maxPDFSize)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: %s for %s", errMsg, url)
-		return result, errors.New(errMsg)
+		return fmt.Errorf("PDF file size (%d bytes) exceeds the limit of %d bytes", resp.ContentLength, maxPDFSize)
 	}
 
 	// 2. Process the response body as a stream
@@ -80,13 +58,9 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*Ext
 	if err != nil {
 		// Check if the error is due to non-PDF content
 		if err == ErrNotPDF {
-			result.Error = ErrNotPDF.Error()
-			return result, ErrNotPDF
+			return ErrNotPDF
 		}
-		errMsg := fmt.Sprintf("failed to extract text from PDF stream: %v", err)
-		result.Error = errMsg
-		logger.LogError("PDFExtractor: Error processing stream for %s: %v", url, err)
-		return result, fmt.Errorf("pdf stream processing failed for %s: %w", url, err)
+		return fmt.Errorf("pdf stream processing failed for %s: %w", url, err)
 	}
 
 	// 3. Truncate content if necessary
@@ -101,7 +75,7 @@ func (e *PDFExtractor) Extract(url string, endpoint string, maxChars *int) (*Ext
 	result.Data = PDFData{
 		TextContent: textContent,
 	}
-	return result, nil
+	return nil
 }
 
 // extractTextFromPDF extracts text from PDF content using the pdftotext CLI tool.

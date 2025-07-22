@@ -117,13 +117,9 @@ func NewTwitterExtractor(appConfig *config.AppConfig, browserPool *browser.Pool,
 
 // Extract fetches Twitter/X post content and comments
 
-func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("TwitterExtractor: Starting extraction", "url", targetURL)
-
-	result := &ExtractedResult{
-		URL:        targetURL,
-		SourceType: "twitter",
-	}
+	result.SourceType = "twitter"
 
 	// Create a timeout context for the entire extraction
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -131,28 +127,21 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 
 	// Check if we have Twitter credentials
 	if e.Config.TwitterUsername == "" || e.Config.TwitterPassword == "" {
-		result.Error = "Twitter credentials not configured"
-		slog.Warn("TwitterExtractor: Missing Twitter credentials", "url", targetURL)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("Twitter credentials not configured")
 	}
 
 	if isProfileURL(targetURL) {
 		// Handle profile URL
 		if endpoint != "/extract" {
-			err := fmt.Errorf("twitter profile URL extraction is only available on the /extract endpoint")
-			result.Error = err.Error()
-			slog.Warn("TwitterExtractor: Attempted to extract profile from non-/extract endpoint", "url", targetURL)
-			return result, err
+			return fmt.Errorf("twitter profile URL extraction is only available on the /extract endpoint")
 		}
-		return e.extractFromProfileURL(ctx, targetURL, maxChars)
+		return e.extractFromProfileURL(ctx, targetURL, maxChars, result)
 	}
 
 	// Handle single tweet URL (existing logic)
 	tweetID := extractTweetID(targetURL)
 	if tweetID == "" {
-		result.Error = "could not extract tweet ID from URL"
-		slog.Error("TwitterExtractor: Could not extract tweet ID from URL", "url", targetURL)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("could not extract tweet ID from URL")
 	}
 
 	slog.Debug("TwitterExtractor: Extracted Tweet ID", "tweet_id", tweetID, "url", targetURL)
@@ -160,9 +149,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	// Extract tweet data using browser automation with context
 	tweetData, err := e.extractTweetDataWithContext(ctx, tweetID, targetURL)
 	if err != nil {
-		result.Error = fmt.Sprintf("extraction failed: %v", err)
-		slog.Error("TwitterExtractor: Error extracting data", "url", targetURL, "error", err)
-		return result, err
+		return fmt.Errorf("extraction failed: %w", err)
 	}
 
 	result.Data = tweetData
@@ -196,7 +183,7 @@ func (e *TwitterExtractor) Extract(targetURL string, endpoint string, maxChars *
 	}
 
 	slog.Info("TwitterExtractor: Successfully extracted tweet data", "url", targetURL)
-	return result, nil
+	return nil
 }
 
 // extractTweetID extracts the tweet ID from various Twitter/X URL formats
@@ -579,17 +566,12 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 }
 
 // extractFromProfileURL handles the extraction of the latest 5 tweets from a profile URL.
-func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL string, maxChars *int) (*ExtractedResult, error) {
-	result := &ExtractedResult{
-		URL:        profileURL,
-		SourceType: "twitter_profile",
-	}
+func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL string, maxChars *int, result *ExtractedResult) error {
+	result.SourceType = "twitter_profile"
 
 	tweetURLs, err := e.extractTweetURLsFromProfile(ctx, profileURL)
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to extract tweet URLs from profile: %v", err)
-		slog.Error("TwitterExtractor: Failed to extract tweet URLs from profile", "url", profileURL, "error", err)
-		return result, err
+		return fmt.Errorf("failed to extract tweet URLs from profile: %w", err)
 	}
 
 	var wg sync.WaitGroup
@@ -630,7 +612,7 @@ func (e *TwitterExtractor) extractFromProfileURL(ctx context.Context, profileURL
 	result.ProcessedSuccessfully = true
 
 	slog.Info("TwitterExtractor: Successfully extracted latest tweets from profile", "url", profileURL)
-	return result, nil
+	return nil
 }
 
 // extractTweetURLsFromProfile extracts the latest 5 tweet URLs from a profile page.

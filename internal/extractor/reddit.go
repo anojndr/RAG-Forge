@@ -232,9 +232,9 @@ func (e *RedditExtractor) parseRedditURL(redditURL string) (*RedditURLInfo, erro
 }
 
 // fetchViaAPI attempts to fetch Reddit data using the official API with concurrent processing
-func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResult, error) {
+func (e *RedditExtractor) fetchViaAPI(subreddit, postID string, result *ExtractedResult) error {
 	if err := e.getAccessToken(); err != nil {
-		return nil, fmt.Errorf("failed to get access token: %v", err)
+		return fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	// Fetch post data
@@ -242,7 +242,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 
 	req, err := http.NewRequest("GET", postURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create API request: %v", err)
+		return fmt.Errorf("failed to create API request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+e.accessToken)
@@ -254,25 +254,21 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 
 	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make API request: %v", err)
+		return fmt.Errorf("failed to make API request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("API request failed with status: %d", resp.StatusCode)
 	}
 
 	var apiResponse []RedditAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode API response: %v", err)
+		return fmt.Errorf("failed to decode API response: %w", err)
 	}
 
 	if len(apiResponse) < 1 || len(apiResponse[0].Data.Children) == 0 {
-		return nil, fmt.Errorf("no post data found in API response")
+		return fmt.Errorf("no post data found in API response")
 	}
 
 	// Process post data and comments concurrently
@@ -291,7 +287,7 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 		defer wg.Done()
 		var post RedditPost
 		if err := json.Unmarshal(apiResponse[0].Data.Children[0].Data, &post); err != nil {
-			resultsChan <- processResult{err: fmt.Errorf("failed to parse post data: %v", err)}
+			resultsChan <- processResult{err: fmt.Errorf("failed to parse post data: %w", err)}
 			return
 		}
 		resultsChan <- processResult{post: &post}
@@ -317,36 +313,32 @@ func (e *RedditExtractor) fetchViaAPI(subreddit, postID string) (*ExtractedResul
 	// Collect results
 	var post *RedditPost
 	var commentsData []RedditComment
-	for result := range resultsChan {
-		if result.err != nil {
-			return nil, result.err
+	for res := range resultsChan {
+		if res.err != nil {
+			return res.err
 		}
-		if result.post != nil {
-			post = result.post
+		if res.post != nil {
+			post = res.post
 		}
-		if result.comments != nil {
-			commentsData = result.comments
+		if res.comments != nil {
+			commentsData = res.comments
 		}
 	}
 
 	if post == nil {
-		return nil, fmt.Errorf("failed to process post data")
+		return fmt.Errorf("failed to process post data")
 	}
 
-	result := &ExtractedResult{
-		URL:                   fmt.Sprintf("https://www.reddit.com/r/%s/comments/%s", subreddit, postID),
-		SourceType:            "reddit",
-		ProcessedSuccessfully: true,
-		Data: RedditData{
-			PostTitle: post.Title,
-			PostBody:  post.Selftext,
-			Score:     post.Score,
-			Author:    post.Author,
-			Comments:  commentsData,
-		},
+	result.ProcessedSuccessfully = true
+	result.Data = RedditData{
+		PostTitle: post.Title,
+		PostBody:  post.Selftext,
+		Score:     post.Score,
+		Author:    post.Author,
+		Comments:  commentsData,
 	}
 
-	return result, nil
+	return nil
 }
 
 // flattenRepliesIterative iteratively extracts and flattens comment replies.
@@ -417,13 +409,13 @@ func (e *RedditExtractor) extractCommentsFromAPI(commentsResp RedditAPIResponse)
 }
 
 // fetchSubredditPosts fetches recent posts from a subreddit
-func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResult, error) {
+func (e *RedditExtractor) fetchSubredditPosts(subreddit string, result *ExtractedResult) error {
 	// Use .json endpoint for subreddit
 	jsonURL := fmt.Sprintf("https://www.reddit.com/r/%s/.json?limit=10", subreddit)
 
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create subreddit request: %v", err)
+		return fmt.Errorf("failed to create subreddit request: %w", err)
 	}
 
 	userAgent := e.Config.RedditUserAgent
@@ -434,25 +426,21 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 
 	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make subreddit request: %v", err)
+		return fmt.Errorf("failed to make subreddit request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("subreddit request failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("subreddit request failed with status: %d", resp.StatusCode)
 	}
 
 	var jsonResponse RedditAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jsonResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode subreddit JSON response: %v", err)
+		return fmt.Errorf("failed to decode subreddit JSON response: %w", err)
 	}
 
 	if len(jsonResponse.Data.Children) == 0 {
-		return nil, fmt.Errorf("no posts found in subreddit")
+		return fmt.Errorf("no posts found in subreddit")
 	}
 
 	// Extract posts data
@@ -465,30 +453,26 @@ func (e *RedditExtractor) fetchSubredditPosts(subreddit string) (*ExtractedResul
 		posts = append(posts, post)
 	}
 
-	result := &ExtractedResult{
-		URL:                   fmt.Sprintf("https://www.reddit.com/r/%s/", subreddit),
-		SourceType:            "reddit",
-		ProcessedSuccessfully: true,
-		Data: RedditData{
-			PostTitle: fmt.Sprintf("r/%s - Recent Posts", subreddit),
-			PostBody:  fmt.Sprintf("Recent posts from r/%s", subreddit),
-			Score:     0,
-			Author:    "subreddit",
-			Posts:     posts,
-		},
+	result.ProcessedSuccessfully = true
+	result.Data = RedditData{
+		PostTitle: fmt.Sprintf("r/%s - Recent Posts", subreddit),
+		PostBody:  fmt.Sprintf("Recent posts from r/%s", subreddit),
+		Score:     0,
+		Author:    "subreddit",
+		Posts:     posts,
 	}
 
-	return result, nil
+	return nil
 }
 
 // fetchUserPosts fetches recent posts from a user profile
-func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, error) {
+func (e *RedditExtractor) fetchUserPosts(username string, result *ExtractedResult) error {
 	// Use .json endpoint for user posts
 	jsonURL := fmt.Sprintf("https://www.reddit.com/user/%s/.json?limit=10", username)
 
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create user request: %v", err)
+		return fmt.Errorf("failed to create user request: %w", err)
 	}
 
 	userAgent := e.Config.RedditUserAgent
@@ -499,25 +483,21 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 
 	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make user request: %v", err)
+		return fmt.Errorf("failed to make user request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("user request failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("user request failed with status: %d", resp.StatusCode)
 	}
 
 	var jsonResponse RedditAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jsonResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode user JSON response: %v", err)
+		return fmt.Errorf("failed to decode user JSON response: %w", err)
 	}
 
 	if len(jsonResponse.Data.Children) == 0 {
-		return nil, fmt.Errorf("no posts found for user")
+		return fmt.Errorf("no posts found for user")
 	}
 
 	// Extract user posts data
@@ -530,24 +510,20 @@ func (e *RedditExtractor) fetchUserPosts(username string) (*ExtractedResult, err
 		posts = append(posts, post)
 	}
 
-	result := &ExtractedResult{
-		URL:                   fmt.Sprintf("https://www.reddit.com/user/%s/", username),
-		SourceType:            "reddit",
-		ProcessedSuccessfully: true,
-		Data: RedditData{
-			PostTitle: fmt.Sprintf("u/%s - Recent Posts", username),
-			PostBody:  fmt.Sprintf("Recent posts from u/%s", username),
-			Score:     0,
-			Author:    username,
-			Posts:     posts,
-		},
+	result.ProcessedSuccessfully = true
+	result.Data = RedditData{
+		PostTitle: fmt.Sprintf("u/%s - Recent Posts", username),
+		PostBody:  fmt.Sprintf("Recent posts from u/%s", username),
+		Score:     0,
+		Author:    username,
+		Posts:     posts,
 	}
 
-	return result, nil
+	return nil
 }
 
 // fetchViaJSON attempts to fetch Reddit data using the .json fallback method
-func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*ExtractedResult, error) {
+func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int, result *ExtractedResult) error {
 	// Add .json to the URL if not already present
 	jsonURL := redditURL
 	if !strings.HasSuffix(redditURL, ".json") {
@@ -556,7 +532,7 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 
 	req, err := http.NewRequest("GET", jsonURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JSON request: %v", err)
+		return fmt.Errorf("failed to create JSON request: %w", err)
 	}
 
 	userAgent := e.Config.RedditUserAgent
@@ -567,31 +543,27 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 
 	resp, err := e.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make JSON request: %v", err)
+		return fmt.Errorf("failed to make JSON request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			slog.Warn("RedditExtractor: Failed to close response body", "error", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("JSON request failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("JSON request failed with status: %d", resp.StatusCode)
 	}
 
 	var jsonResponse []RedditAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jsonResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode JSON response: %v", err)
+		return fmt.Errorf("failed to decode JSON response: %w", err)
 	}
 
 	if len(jsonResponse) < 1 || len(jsonResponse[0].Data.Children) == 0 {
-		return nil, fmt.Errorf("no post data found in JSON response")
+		return fmt.Errorf("no post data found in JSON response")
 	}
 
 	// Extract post data
 	var post RedditPost
 	if err := json.Unmarshal(jsonResponse[0].Data.Children[0].Data, &post); err != nil {
-		return nil, fmt.Errorf("failed to parse post data: %v", err)
+		return fmt.Errorf("failed to parse post data: %w", err)
 	}
 
 	// Extract comments data
@@ -600,23 +572,19 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 		commentsData = e.extractCommentsFromAPI(jsonResponse[1])
 	}
 
-	result := &ExtractedResult{
-		URL:                   redditURL,
-		SourceType:            "reddit",
-		ProcessedSuccessfully: true,
-		Data: RedditData{
-			PostTitle: post.Title,
-			PostBody:  post.Selftext,
-			Score:     post.Score,
-			Author:    post.Author,
-			Comments:  commentsData,
-		},
+	result.ProcessedSuccessfully = true
+	result.Data = RedditData{
+		PostTitle: post.Title,
+		PostBody:  post.Selftext,
+		Score:     post.Score,
+		Author:    post.Author,
+		Comments:  commentsData,
 	}
 
 	if maxChars != nil {
 		if data, ok := result.Data.(RedditData); ok {
 			data.PostBody = truncateText(data.PostBody, *maxChars)
-			
+
 			// Truncate comments as well
 			remainingChars := *maxChars - len(data.PostBody)
 			if remainingChars > 0 {
@@ -635,29 +603,23 @@ func (e *RedditExtractor) fetchViaJSON(redditURL string, maxChars *int) (*Extrac
 			} else {
 				data.Comments = []RedditComment{}
 			}
-			
+
 			result.Data = data
 		}
 	}
 
-	return result, nil
+	return nil
 }
 
 // Extract attempts to fetch Reddit data using API first, then falls back to JSON method
-func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("RedditExtractor: Starting extraction", "url", redditURL)
-
-	result := &ExtractedResult{
-		URL:        redditURL,
-		SourceType: "reddit",
-	}
+	result.SourceType = "reddit"
 
 	// Parse the Reddit URL to determine its type
 	urlInfo, err := e.parseRedditURL(redditURL)
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to parse Reddit URL: %v", err)
-		logger.LogError("RedditExtractor: Error parsing URL %s: %s", redditURL, result.Error)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("failed to parse Reddit URL: %w", err)
 	}
 
 	slog.Debug("RedditExtractor: Parsed URL type", "type", urlInfo.Type, "url", redditURL)
@@ -666,53 +628,44 @@ func (e *RedditExtractor) Extract(redditURL string, endpoint string, maxChars *i
 	switch urlInfo.Type {
 	case RedditPostURL, RedditCommentURL:
 		// Handle individual posts (comments are treated as posts with additional context)
-		return e.extractPost(redditURL, urlInfo, maxChars)
+		return e.extractPost(redditURL, urlInfo, maxChars, result)
 
 	case RedditSubredditURL:
 		// Handle subreddit feeds
 		slog.Debug("RedditExtractor: Extracting subreddit posts", "subreddit", urlInfo.Subreddit)
-		return e.fetchSubredditPosts(urlInfo.Subreddit)
+		return e.fetchSubredditPosts(urlInfo.Subreddit, result)
 
 	case RedditUserURL:
 		// Handle user profiles
 		slog.Debug("RedditExtractor: Extracting user posts", "user", urlInfo.Username)
-		return e.fetchUserPosts(urlInfo.Username)
+		return e.fetchUserPosts(urlInfo.Username, result)
 
 	case RedditSearchURL:
 		// Handle search results (not implemented yet)
-		result.Error = "Reddit search URLs are not yet supported"
-		logger.LogError("RedditExtractor: Search URLs not supported for %s", redditURL)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("Reddit search URLs are not yet supported")
 
 	default:
-		result.Error = "unsupported Reddit URL type"
-		logger.LogError("RedditExtractor: Unsupported URL type for %s", redditURL)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("unsupported Reddit URL type")
 	}
 }
 
 // extractPost handles individual Reddit posts
-func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, maxChars *int) (*ExtractedResult, error) {
-	result := &ExtractedResult{
-		URL:        redditURL,
-		SourceType: "reddit",
-	}
-
+func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, maxChars *int, result *ExtractedResult) error {
 	// First, try using the Reddit API
 	if e.Config.RedditClientID != "" && e.Config.RedditClientSecret != "" {
 		slog.Debug("RedditExtractor: Attempting to use Reddit API", "url", redditURL)
-		apiResult, err := e.fetchViaAPI(urlInfo.Subreddit, urlInfo.PostID)
+		err := e.fetchViaAPI(urlInfo.Subreddit, urlInfo.PostID, result)
 		if err == nil {
 			slog.Info("RedditExtractor: Successfully extracted data via API", "url", redditURL)
 			if maxChars != nil {
-				if data, ok := apiResult.Data.(RedditData); ok {
+				if data, ok := result.Data.(RedditData); ok {
 					if len(data.PostBody) > *maxChars {
 						data.PostBody = data.PostBody[:*maxChars]
-						apiResult.Data = data
+						result.Data = data
 					}
 				}
 			}
-			return apiResult, nil
+			return nil
 		}
 		logger.LogError("RedditExtractor: API method failed for %s: %v. Falling back to JSON method", redditURL, err)
 	} else {
@@ -721,14 +674,12 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 
 	// Fallback to JSON method
 	slog.Debug("RedditExtractor: Attempting to use JSON method", "url", redditURL)
-	jsonResult, err := e.fetchViaJSON(redditURL, maxChars)
+	err := e.fetchViaJSON(redditURL, maxChars, result)
 	if err != nil {
-		result.Error = fmt.Sprintf("both API and JSON methods failed: %v", err)
-		logger.LogError("RedditExtractor: All methods failed for %s: %s", redditURL, result.Error)
-		return result, fmt.Errorf(result.Error)
+		return fmt.Errorf("both API and JSON methods failed: %w", err)
 	}
 
 	slog.Info("RedditExtractor: Successfully extracted data via JSON method", "url", redditURL)
-	return jsonResult, nil
+	return nil
 }
 

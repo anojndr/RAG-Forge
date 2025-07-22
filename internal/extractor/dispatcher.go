@@ -61,26 +61,33 @@ func (d *Dispatcher) register(domain string, extractor Extractor) {
 }
 
 // DispatchAndExtract determines the URL type and calls the appropriate extractor.
+// DispatchAndExtract is deprecated. Use DispatchAndExtractWithContext with a pooled ExtractedResult.
+// This function is kept for simple, non-pooled, single-URL extractions if ever needed,
+// but the primary flow should use the pooled version.
 func (d *Dispatcher) DispatchAndExtract(targetURL string, maxChars *int) (*ExtractedResult, error) {
-	// Default to not using headless browser if context is not provided.
-	return d.DispatchAndExtractWithContext(targetURL, "", maxChars)
+	result := ExtractedResultPool.Get().(*ExtractedResult)
+	result.Reset()
+	result.URL = targetURL
+
+	err := d.DispatchAndExtractWithContext(targetURL, "", maxChars, result)
+	if err != nil {
+		result.ProcessedSuccessfully = false
+		result.Error = err.Error()
+	}
+	return result, err
 }
 
 // DispatchAndExtractWithContext determines the URL type and calls the appropriate extractor with context.
-func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("Dispatching URL", "url", targetURL, "endpoint", endpoint)
 
 	parsedURL, err := url.Parse(targetURL)
 	if err != nil {
 		wrappedErr := fmt.Errorf("failed to parse URL %s: %w", targetURL, err)
 		logger.LogError("Error: %v", wrappedErr)
-		result := &ExtractedResult{
-			URL:                   targetURL,
-			ProcessedSuccessfully: false,
-			Error:                 "Invalid URL format",
-			SourceType:            "unknown",
-		}
-		return result, wrappedErr
+		result.Error = "Invalid URL format"
+		result.SourceType = "unknown"
+		return wrappedErr
 	}
 
 	hostname := strings.ToLower(parsedURL.Hostname())
@@ -89,14 +96,14 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	if strings.HasSuffix(strings.ToLower(parsedURL.Path), ".pdf") {
 		if extractor, ok := d.extractors[".pdf"]; ok {
 			slog.Debug("Dispatcher found match for PDF", "url", targetURL)
-			return extractor.Extract(targetURL, endpoint, maxChars)
+			return extractor.Extract(targetURL, endpoint, maxChars, result)
 		}
 	}
 
 	for domain, extractor := range d.extractors {
 		if strings.Contains(hostname, domain) {
 			slog.Debug("Dispatcher found match", "url", targetURL, "domain", domain)
-			return extractor.Extract(targetURL, endpoint, maxChars)
+			return extractor.Extract(targetURL, endpoint, maxChars, result)
 		}
 	}
 
@@ -105,43 +112,38 @@ func (d *Dispatcher) DispatchAndExtractWithContext(targetURL string, endpoint st
 	if endpoint == "/extract" {
 		slog.Debug("Using JS-enabled (headless) extractor", "url", targetURL, "endpoint", endpoint)
 		if d.jsWebpageExtractor != nil {
-			result, err := d.jsWebpageExtractor.Extract(targetURL, endpoint, maxChars)
+			err := d.jsWebpageExtractor.Extract(targetURL, endpoint, maxChars, result)
 			if err != nil {
-				return result, fmt.Errorf("js webpage extraction failed: %w", err)
+				return fmt.Errorf("js webpage extraction failed: %w", err)
 			}
-			return result, nil
+			return nil
 		}
-		result, err := d.unimplementedOrFailedInitExtractor("webpage_js", targetURL, d.jsWebpageExtractor == nil)
-		return result, err
+		return d.unimplementedOrFailedInitExtractor("webpage_js", result, d.jsWebpageExtractor == nil)
 	}
 
 	// Fallback to the standard webpage extractor for /search or when headless is not requested.
 	slog.Debug("Using standard webpage extractor", "url", targetURL, "endpoint", endpoint)
 	if extractor, ok := d.extractors["webpage"]; ok {
-		result, err := extractor.Extract(targetURL, endpoint, maxChars)
+		err := extractor.Extract(targetURL, endpoint, maxChars, result)
 		if err != nil {
-			return result, fmt.Errorf("webpage extraction failed: %w", err)
+			return fmt.Errorf("webpage extraction failed: %w", err)
 		}
-		return result, nil
+		return nil
 	}
-	result, err := d.unimplementedOrFailedInitExtractor("webpage", targetURL, d.extractors["webpage"] == nil)
-	return result, err
+	return d.unimplementedOrFailedInitExtractor("webpage", result, d.extractors["webpage"] == nil)
 }
 
-func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType, targetURL string, initFailed bool) (*ExtractedResult, error) {
+func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType string, result *ExtractedResult, initFailed bool) error {
 	var errMsg string
 	if initFailed {
 		errMsg = fmt.Sprintf("%s extractor failed to initialize", sourceType)
 	} else {
 		errMsg = fmt.Sprintf("%s extractor not implemented (this should not happen if init was attempted)", sourceType)
 	}
-	slog.Error(errMsg, "url", targetURL)
-	return &ExtractedResult{
-		URL:                   targetURL,
-		SourceType:            sourceType,
-		ProcessedSuccessfully: false,
-		Error:                 errMsg,
-	}, fmt.Errorf("%s", errMsg)
+	slog.Error(errMsg, "url", result.URL)
+	result.SourceType = sourceType
+	result.Error = errMsg
+	return fmt.Errorf("%s", errMsg)
 }
 
 

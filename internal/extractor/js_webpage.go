@@ -3,16 +3,16 @@ package extractor
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
-	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 
 	"web-search-api-for-llms/internal/browser"
 	"web-search-api-for-llms/internal/config"
-	"web-search-api-for-llms/internal/logger"
 )
 
 // JSWebpageExtractor implements the Extractor interface for general web pages that require JavaScript rendering.
@@ -30,24 +30,19 @@ func NewJSWebpageExtractor(appConfig *config.AppConfig, browserPool *browser.Poo
 }
 
 // Extract uses a headless browser (chromedp) to get the visible text from a URL.
-func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int) (*ExtractedResult, error) {
+func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int, result *ExtractedResult) error {
 	slog.Info("JSWebpageExtractor: Starting extraction", "url", url)
-	result := &ExtractedResult{
-		URL:        url,
-		SourceType: "webpage_js",
-	}
+	result.SourceType = "webpage_js"
 
 	ctx, cancel := context.WithTimeout(context.Background(), e.Config.JSExtractionTimeout)
 	defer cancel()
 
-	browser := e.BrowserPool.Get()
-	defer e.BrowserPool.Return(browser)
+	browserInstance := e.BrowserPool.Get()
+	defer e.BrowserPool.Return(browserInstance)
 
-	page, err := browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+	page, err := browserInstance.Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to create page: %v", err)
-		logger.LogError(result.Error)
-		return result, err
+		return fmt.Errorf("failed to create page: %w", err)
 	}
 	defer page.MustClose()
 
@@ -72,77 +67,47 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 	// Set user agent
 	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 	if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: userAgent}); err != nil {
-		logger.LogError("failed to set user agent: %v", err)
+		slog.Warn("failed to set user agent", "error", err)
 	}
-
-	var title, textContent string
-
-	// Event handler for redirects
-	go page.EachEvent(func(e *proto.PageFrameNavigated) {
-		slog.Debug("JSWebpageExtractor: Page navigated (redirect)", "url", e.Frame.URL)
-	})()
 
 	if err := page.Context(ctx).Navigate(url); err != nil {
-		errMsg := fmt.Sprintf("failed to navigate to %s: %v", url, err)
-		result.Error = errMsg
-		logger.LogError(errMsg)
-		return result, err
+		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 
-	page.Context(ctx).WaitNavigation(proto.PageLifecycleEventNameNetworkAlmostIdle)()
-	if ctx.Err() != nil {
-		logger.LogError("failed to wait for network idle for %s: %v", url, ctx.Err())
-		// Continue execution, as this is not always a fatal error
-	}
+	// Wait for the network to be mostly idle, but don't fail if it times out
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	page.Context(waitCtx).WaitNavigation(proto.PageLifecycleEventNameNetworkAlmostIdle)()
+
 
 	// Get title
 	info, err := page.Context(ctx).Info()
+	var title string
 	if err != nil {
-		logger.LogError("failed to get page info for %s: %v", url, err)
+		slog.Warn("failed to get page info", "url", url, "error", err)
 	} else {
 		title = info.Title
 	}
 
 	// Wait for the body element to be ready
-	page.Context(ctx).MustElement("body")
+	if _, err := page.Context(ctx).Element("body"); err != nil {
+		return fmt.Errorf("failed to find body element on %s: %w", url, err)
+	}
 
-	// Select all text using JavaScript
-	_, err = page.Context(ctx).Eval(`() => {
-		const range = document.createRange();
-		range.selectNode(document.body);
-		window.getSelection().removeAllRanges();
-		window.getSelection().addRange(range);
-	}`)
+	// Try to get content using a robust innerText script
+	eval, err := page.Context(ctx).Eval(`() => document.body.innerText`)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to select all text with javascript on %s: %v", url, err)
-		result.Error = errMsg
-		logger.LogError(errMsg)
-		return result, err
+		return fmt.Errorf("failed to evaluate javascript on %s: %w", url, err)
 	}
+	textContent := eval.Value.Str()
 
-	// Get selected text
-	text, err := page.Context(ctx).Eval("() => window.getSelection().toString()")
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to get selected text on %s: %v", url, err)
-		result.Error = errMsg
-		logger.LogError(errMsg)
-		return result, err
-	}
-	textContent = text.Value.Str()
-
-	if len(strings.TrimSpace(textContent)) == 0 {
-		slog.Debug("JSWebpageExtractor: No text content from selection, falling back to innerText", "url", url)
-		eval, err := page.Context(ctx).Eval(`() => document.body.innerText`)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to evaluate javascript on %s: %v", url, err)
-			result.Error = errMsg
-			logger.LogError(errMsg)
-			return result, err
-		}
-		textContent = eval.Value.Str()
-	}
 
 	slog.Info("JSWebpageExtractor: Finished scraping", "url", url, "title", title, "text_length", len(textContent))
+
+	// Truncate if necessary
+	if maxChars != nil && len(textContent) > *maxChars {
+		textContent = textContent[:*maxChars]
+	}
 
 	result.ProcessedSuccessfully = true
 	result.Data = WebpageData{
@@ -150,14 +115,5 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int)
 		Title:       title,
 	}
 
-	if maxChars != nil {
-		if data, ok := result.Data.(WebpageData); ok {
-			if len(data.TextContent) > *maxChars {
-				data.TextContent = data.TextContent[:*maxChars]
-				result.Data = data
-			}
-		}
-	}
-
-	return result, nil
+	return nil
 }
