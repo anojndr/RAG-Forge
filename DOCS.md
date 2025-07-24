@@ -47,7 +47,6 @@ Before you begin, ensure you have the following dependencies installed.
 ### System Dependencies
 
 -   **Go**: Version 1.23.1 or higher.
--   **Docker & Docker Compose**: Required to run the main application and the transcript microservice together.
 -   **`pdftotext`**: Required for PDF text extraction. On Debian/Ubuntu, install with `sudo apt-get install poppler-utils`.
 -   **Chromium-based Browser**: Required for the `/extract` endpoint and Twitter/X features. Install Google Chrome, Chromium, or another compatible browser.
 
@@ -100,15 +99,7 @@ Configuration is managed via a `.env` file in the project root.
 
 The API server runs on port `8086`. There are two recommended ways to run the application and its microservice.
 
-### Option 1: With Docker (Recommended)
-This is the simplest way to get started. With your dependencies installed and `.env` file configured, start both services with:
-```bash
-docker-compose up --build
-```
-This command builds the Docker images for both the Go API and the Python transcript service and runs them in a networked environment with optimized resource allocation.
-
-### Option 2: Without Docker
-A convenience script, `run-no-docker.sh`, is provided to set up and run both services locally. This script will:
+A convenience script, `run.sh`, is provided to set up and run both services locally. This script will:
 1. Create a Python virtual environment for the transcript service.
 2. Install its dependencies from `requirements.txt`.
 3. Start the Python service in the background.
@@ -116,7 +107,7 @@ A convenience script, `run-no-docker.sh`, is provided to set up and run both ser
 
 To use it, simply run:
 ```bash
-./run-no-docker.sh
+./run.sh
 ```
 The script handles graceful shutdown of both processes when you stop it (e.g., with `Ctrl+C`).
 
@@ -312,11 +303,10 @@ if __name__ == "__main__":
     -   Make sure your `TWITTER_USERNAME` and `TWITTER_PASSWORD` are correct.
     -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login attempt.
 -   **YouTube transcript extraction fails**:
-	-   Check the logs for the `transcript-service` container using `docker-compose logs transcript-service`.
 	-   Ensure the service is running and accessible from the main Go application at the `TRANSCRIPT_SERVICE_URL`.
 -   **Server fails to start with "address already in use"**:
-	-   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go` and `docker-compose.yml`.
+	-   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
 
 ## Development & Testing
 
-Use standard Go commands for development (`go build`, `go test`, `go run main.go`). The build and run process is now primarily managed through Docker Compose or the provided `run-no-docker.sh` script.
+Use standard Go commands for development (`go build`, `go test`, `go run main.go`). The build and run process is now primarily managed through the provided `run.sh` script.

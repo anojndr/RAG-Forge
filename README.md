@@ -48,7 +48,6 @@ A high-level overview of the main directories and key files:
 *   `transcript-service/`: A separate Python FastAPI microservice for YouTube transcript extraction.
 *   [`main.go`](main.go): The entry point for the Go API server.
 *   [`DOCS.md`](DOCS.md): **Comprehensive documentation on setup, configuration, API reference, and usage.**
-*   [`docker-compose.yml`](docker-compose.yml): Defines the services, networking, and resource allocation for running the application with Docker.
 *   [`go.mod`](go.mod): Defines the Go module and its dependencies.
 
 ## Prerequisites
@@ -56,7 +55,6 @@ A high-level overview of the main directories and key files:
 To run this project, you need the following installed:
 
 *   **Go**: Version 1.23.1 or higher.
-*   **Docker & Docker Compose**: For running the application and its microservice together.
 *   **External Tools**:
 	*   **`pdftotext`**: For PDF extraction (from the `poppler-utils` package on Linux).
 	*   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
@@ -86,16 +84,9 @@ For detailed installation instructions, please refer to the **[Installation sect
 4.  **Run the Application:**
     There are two ways to run the application:
    
-    **Option 1: With Docker (Recommended)**
-    This is the simplest and most reliable way to run both the API server and the transcript microservice.
+    A convenience script is provided to run both services locally. It will set up a Python virtual environment and manage both processes.
     ```bash
-    docker-compose up --build
-    ```
-   
-    **Option 2: Without Docker**
-    A convenience script is provided to run both services locally without Docker. It will set up a Python virtual environment and manage both processes.
-    ```bash
-    ./run-no-docker.sh
+    ./run.sh
     ```
 
 ## API Usage
