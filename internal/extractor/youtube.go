@@ -14,9 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/api/option"
-	"google.golang.org/api/youtube/v3"
-
 	"web-search-api-for-llms/internal/config"
 	"web-search-api-for-llms/internal/logger"
 )
@@ -24,20 +21,12 @@ import (
 // YouTubeExtractor implements the Extractor interface for YouTube URLs.
 type YouTubeExtractor struct {
 	BaseExtractor
-	youtubeService *youtube.Service
 }
 
 // NewYouTubeExtractor creates a new YouTubeExtractor.
 func NewYouTubeExtractor(appConfig *config.AppConfig, client *http.Client) (*YouTubeExtractor, error) {
-	ctx := context.Background()
-	ytService, err := youtube.NewService(ctx, option.WithAPIKey(appConfig.YouTubeAPIKey), option.WithHTTPClient(client))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create YouTube service: %w", err)
-	}
-
 	return &YouTubeExtractor{
-		BaseExtractor:  NewBaseExtractor(appConfig, client),
-		youtubeService: ytService,
+		BaseExtractor: NewBaseExtractor(appConfig, client),
 	}, nil
 }
 
@@ -75,48 +64,30 @@ func (e *YouTubeExtractor) extractVideo(videoURL string, videoID string, maxChar
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		call := e.youtubeService.Videos.List([]string{"snippet"}).Id(videoID)
-		resp, err := call.Do()
+		title, chName, err := e.fetchVideoDetails(videoID)
 		if err != nil {
 			errsMutex.Lock()
 			errs = append(errs, fmt.Sprintf("youtube api video details: %v", err))
 			errsMutex.Unlock()
 			return
 		}
-		if len(resp.Items) > 0 {
-			videoTitle = resp.Items[0].Snippet.Title
-			channelName = resp.Items[0].Snippet.ChannelTitle
-			slog.Debug("YouTubeExtractor: Fetched video details", "title", videoTitle, "channel", channelName, "video_id", videoID)
-		} else {
-			errsMutex.Lock()
-			errs = append(errs, "youtube api: no video details found")
-			errsMutex.Unlock()
-		}
+		videoTitle = title
+		channelName = chName
+		slog.Debug("YouTubeExtractor: Fetched video details", "title", videoTitle, "channel", channelName, "video_id", videoID)
 	}()
 
 	// 2. Fetch Top Comments
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		call := e.youtubeService.CommentThreads.List([]string{"snippet"}).
-			VideoId(videoID).
-			Order("relevance").
-			MaxResults(50)
-
-		resp, err := call.Do()
+		comments, err := e.fetchVideoComments(videoID)
 		if err != nil {
 			errsMutex.Lock()
 			errs = append(errs, fmt.Sprintf("youtube api comments: %v", err))
 			errsMutex.Unlock()
 			return
 		}
-		for _, item := range resp.Items {
-			comment := item.Snippet.TopLevelComment.Snippet
-			commentsData = append(commentsData, map[string]interface{}{
-				"author": comment.AuthorDisplayName,
-				"text":   comment.TextDisplay,
-			})
-		}
+		commentsData = comments
 		slog.Debug("YouTubeExtractor: Fetched comments", "count", len(commentsData), "video_id", videoID)
 	}()
 
@@ -209,31 +180,14 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 	result.SourceType = "youtube_playlist"
 
 	// 1. Get Playlist Details (Title, Channel)
-	playlistCall := e.youtubeService.Playlists.List([]string{"snippet"}).Id(playlistID)
-	playlistResp, err := playlistCall.Do()
+	playlistTitle, channelName, err := e.fetchPlaylistDetails(playlistID)
 	if err != nil {
 		return fmt.Errorf("youtube api playlist details: %w", err)
 	}
-	if len(playlistResp.Items) == 0 {
-		return fmt.Errorf("youtube api: no playlist details found")
-	}
-	playlistTitle := playlistResp.Items[0].Snippet.Title
-	channelName := playlistResp.Items[0].Snippet.ChannelTitle
 	slog.Debug("YouTubeExtractor: Fetched playlist details", "title", playlistTitle, "channel", channelName)
 
 	// 2. Get Playlist Items (Video IDs and Titles)
-	var videoItems []map[string]string
-	playlistItemsCall := e.youtubeService.PlaylistItems.List([]string{"snippet"}).PlaylistId(playlistID).MaxResults(50) // Get up to 50 items
-	err = playlistItemsCall.Pages(context.Background(), func(resp *youtube.PlaylistItemListResponse) error {
-		for _, item := range resp.Items {
-			videoItems = append(videoItems, map[string]string{
-				"title":    item.Snippet.Title,
-				"video_id": item.Snippet.ResourceId.VideoId,
-			})
-		}
-		return nil
-	})
-
+	videoItems, err := e.fetchPlaylistItems(playlistID)
 	if err != nil {
 		return fmt.Errorf("youtube api playlist items: %w", err)
 	}
@@ -251,6 +205,149 @@ func (e *YouTubeExtractor) extractPlaylist(playlistURL, playlistID string, maxCh
 	// A more advanced implementation could truncate the number of videos.
 
 	return nil
+}
+
+func (e *YouTubeExtractor) fetchVideoDetails(videoID string) (string, string, error) {
+	apiURL := fmt.Sprintf("https://www.googleapis.com/youtube/v3/videos?part=snippet&id=%s&key=%s", videoID, e.Config.YouTubeAPIKey)
+	resp, err := e.HTTPClient.Get(apiURL)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	var videoResponse struct {
+		Items []struct {
+			Snippet struct {
+				Title       string `json:"title"`
+				ChannelTitle string `json:"channelTitle"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&videoResponse); err != nil {
+		return "", "", err
+	}
+
+	if len(videoResponse.Items) == 0 {
+		return "", "", errors.New("no video details found")
+	}
+
+	return videoResponse.Items[0].Snippet.Title, videoResponse.Items[0].Snippet.ChannelTitle, nil
+}
+
+func (e *YouTubeExtractor) fetchVideoComments(videoID string) ([]interface{}, error) {
+	apiURL := fmt.Sprintf("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=%s&order=relevance&maxResults=50&key=%s", videoID, e.Config.YouTubeAPIKey)
+	resp, err := e.HTTPClient.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	var commentResponse struct {
+		Items []struct {
+			Snippet struct {
+				TopLevelComment struct {
+					Snippet struct {
+						AuthorDisplayName string `json:"authorDisplayName"`
+						TextDisplay       string `json:"textDisplay"`
+					} `json:"snippet"`
+				} `json:"topLevelComment"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&commentResponse); err != nil {
+		return nil, err
+	}
+
+	var commentsData []interface{}
+	for _, item := range commentResponse.Items {
+		comment := item.Snippet.TopLevelComment.Snippet
+		commentsData = append(commentsData, map[string]interface{}{
+			"author": comment.AuthorDisplayName,
+			"text":   comment.TextDisplay,
+		})
+	}
+
+	return commentsData, nil
+}
+
+func (e *YouTubeExtractor) fetchPlaylistDetails(playlistID string) (string, string, error) {
+	apiURL := fmt.Sprintf("https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=%s&key=%s", playlistID, e.Config.YouTubeAPIKey)
+	resp, err := e.HTTPClient.Get(apiURL)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	var playlistResponse struct {
+		Items []struct {
+			Snippet struct {
+				Title       string `json:"title"`
+				ChannelTitle string `json:"channelTitle"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&playlistResponse); err != nil {
+		return "", "", err
+	}
+
+	if len(playlistResponse.Items) == 0 {
+		return "", "", errors.New("no playlist details found")
+	}
+
+	return playlistResponse.Items[0].Snippet.Title, playlistResponse.Items[0].Snippet.ChannelTitle, nil
+}
+
+func (e *YouTubeExtractor) fetchPlaylistItems(playlistID string) ([]map[string]string, error) {
+	apiURL := fmt.Sprintf("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=%s&maxResults=50&key=%s", playlistID, e.Config.YouTubeAPIKey)
+	resp, err := e.HTTPClient.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	var playlistItemsResponse struct {
+		Items []struct {
+			Snippet struct {
+				Title      string `json:"title"`
+				ResourceId struct {
+					VideoId string `json:"videoId"`
+				} `json:"resourceId"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&playlistItemsResponse); err != nil {
+		return nil, err
+	}
+
+	var videoItems []map[string]string
+	for _, item := range playlistItemsResponse.Items {
+		videoItems = append(videoItems, map[string]string{
+			"title":    item.Snippet.Title,
+			"video_id": item.Snippet.ResourceId.VideoId,
+		})
+	}
+
+	return videoItems, nil
 }
 
 

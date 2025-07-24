@@ -21,6 +21,7 @@ import (
 	"web-search-api-for-llms/internal/worker"
 
 	"github.com/google/uuid"
+	_ "github.com/joho/godotenv/autoload" // Automatically load .env file
 	goCache "github.com/patrickmn/go-cache"
 	_ "go.uber.org/automaxprocs"
 	"golang.org/x/sys/unix"
