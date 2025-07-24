@@ -80,9 +80,9 @@ Configuration is managed via a `.env` file in the project root.
 | `PORT`                    | The port for the API server. *Note: The port is currently hardcoded to `8086` in `main.go` and `docker-compose.yml`.* | `8080`                             | No                                 |
 | `MAIN_SEARCH_ENGINE`      | The primary search engine. Can be `searxng` or `serper`.                                                    | `searxng`                          | No                                 |
 | `FALLBACK_SEARCH_ENGINE`  | The fallback engine if the primary fails. Can be `searxng`, `serper`, or empty.                           | `serper`                           | No                                 |
-| `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://localhost:18088`           | If using `searxng`                 |
+| `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://127.0.0.1:18088`           | If using `searxng`                 |
 | `SERPER_API_KEY`          | Your API key from [serper.dev](https://serper.dev/).                                                      | (none)                             | If using `serper`                  |
-| `TRANSCRIPT_SERVICE_URL`  | The URL of the Python transcript microservice.                                                            | `http://localhost:8000`            | No                                 |
+| `TRANSCRIPT_SERVICE_URL`  | The URL of the Python transcript microservice.                                                            | `http://127.0.0.1:8000`            | No                                 |
 | `YOUTUBE_API_KEY`         | Your YouTube Data API v3 key for fetching video details and comments.                                     | (none)                             | For YouTube features               |
 | `YOUTUBE_TRANSCRIPT_ORDER`| Comma-separated order of transcript methods. Valid entries: `ytapi` (microservice), `tactiq`.           | `ytapi,tactiq`                     | No                                 |
 | `REDDIT_CLIENT_ID`        | Your Reddit app client ID.                                                                                | (none)                             | For Reddit features                |
@@ -90,7 +90,7 @@ Configuration is managed via a `.env` file in the project root.
 | `TWITTER_USERNAME`        | Your Twitter/X username or email for logging in.                                                          | (none)                             | For Twitter/X features             |
 | `TWITTER_PASSWORD`        | Your Twitter/X password.                                                                                  | (none)                             | For Twitter/X features             |
 | `CACHE_TYPE`              | Cache type to use. Valid values: `memory`, `redis`.                                                       | `memory`                           | No                                 |
-| `REDIS_URL`               | Redis connection URL.                                                                                     | `localhost:6379`                   | If using `redis`                   |
+| `REDIS_URL`               | Redis connection URL.                                                                                     | `127.0.0.1:6379`                   | If using `redis`                   |
 | `SEARCH_CACHE_TTL`        | Cache duration for search results (e.g., `10m`, `1h`).                                                     | `10m`                              | No                                 |
 | `CONTENT_CACHE_TTL`       | Cache duration for extracted content.                                                                     | `1h`                               | No                                 |
 | `HTTP_WORKER_POOL_SIZE`   | Number of concurrent workers for I/O-bound tasks (webpages, APIs).                                        | `1000`                             | No                                 |
@@ -141,7 +141,7 @@ Performs a web search, then extracts content from the top results. This endpoint
 
 **Example Request:**
 ```bash
-curl -X POST http://localhost:8086/search \
+curl -X POST http://127.0.0.1:8086/search \
 -H "Content-Type: application/json" \
 -d '{
   "query": "What is Retrieval-Augmented Generation?",
@@ -168,7 +168,7 @@ Extracts content directly from a list of provided URLs. This endpoint is **optim
 
 **Example Request:**
 ```bash
-curl -X POST http://localhost:8086/extract \
+curl -X POST http://127.0.0.1:8086/extract \
 -H "Content-Type: application/json" \
 -d '{
   "urls": [
@@ -190,7 +190,7 @@ A simple endpoint to check if the API server is running.
 
 **Example Request:**
 ```bash
-curl http://localhost:8086/health
+curl http://127.0.0.1:8086/health
 ```
 
 **Example Response (`200 OK`):**
@@ -271,7 +271,7 @@ You can see this API in action by checking out the **Discord AI Chatbot**, which
 import requests
 import json
 
-API_BASE_URL = "http://localhost:8086"
+API_BASE_URL = "http://127.0.0.1:8086"
 
 def search_content(query: str, max_results: int = 5):
     """Search and extract content using the /search endpoint."""

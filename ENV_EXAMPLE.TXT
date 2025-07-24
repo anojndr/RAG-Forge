@@ -23,8 +23,8 @@ FALLBACK_SEARCH_ENGINE=serper
 # SEARXNG CONFIGURATION
 # =============================================================================
 
-# URL of your SearxNG instance (default: http://localhost:18088)
-SEARXNG_URL=http://localhost:18088
+# URL of your SearxNG instance (default: http://127.0.0.1:18088)
+SEARXNG_URL=http://127.0.0.1:18088
 
 # =============================================================================
 # SERPER API CONFIGURATION
@@ -46,7 +46,7 @@ SERPER_API_URL=https://google.serper.dev/search
 YOUTUBE_API_KEY=your_youtube_api_key_here
 
 # URL for the Python transcript microservice
-TRANSCRIPT_SERVICE_URL=http://localhost:8000
+TRANSCRIPT_SERVICE_URL=http://127.0.0.1:8000
 
 # Order of transcript extraction methods (comma-separated)
 # Valid entries: ytapi (youtube-transcript-api), tactiq
@@ -91,7 +91,7 @@ WEBSHARE_PROXY_PASSWORD=your_webshare_password_here
 CACHE_TYPE=memory
 
 # Redis configuration (only used if CACHE_TYPE is redis)
-REDIS_URL=localhost:6379
+REDIS_URL=127.0.0.1:6379
 REDIS_PASSWORD=
 REDIS_DB=0
 # Cache expiration settings (e.g., 10m, 1h, 30s)

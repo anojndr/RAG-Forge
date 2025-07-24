@@ -70,7 +70,7 @@ func LoadConfig() (*AppConfig, error) {
 		TranscriptOrder:       getEnv("YOUTUBE_TRANSCRIPT_ORDER", "ytapi,tactiq"),
 		TwitterUsername:       os.Getenv("TWITTER_USERNAME"),
 		TwitterPassword:       os.Getenv("TWITTER_PASSWORD"),
-		TranscriptServiceURL:  getEnv("TRANSCRIPT_SERVICE_URL", "http://localhost:8000"),
+		TranscriptServiceURL:  getEnv("TRANSCRIPT_SERVICE_URL", "http://127.0.0.1:8000"),
 
 		// Cache configuration
 		CacheType:     getEnv("CACHE_TYPE", "memory"),

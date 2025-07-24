@@ -100,11 +100,11 @@ For detailed installation instructions, please refer to the **[Installation sect
 
 ## API Usage
 
-Once running, the API is available at `http://localhost:8086`.
+Once running, the API is available at `http://127.0.0.1:8086`.
 
 **Example: Search and extract content (fast mode)**
 ```bash
-curl -X POST http://localhost:8086/search \
+curl -X POST http://127.0.0.1:8086/search \
 -H "Content-Type: application/json" \
 -d '{
   "query": "benefits of learning Go",
@@ -114,7 +114,7 @@ curl -X POST http://localhost:8086/search \
 
 **Example: Extract content from a Twitter/X URL (compatibility mode)**
 ```bash
-curl -X POST http://localhost:8086/extract \
+curl -X POST http://127.0.0.1:8086/extract \
 -H "Content-Type: application/json" \
 -d '{
   "urls": [
