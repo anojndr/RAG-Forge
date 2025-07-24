@@ -264,13 +264,30 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 
 	// Perform a single, pipelined cache write for all successful results
 	if len(itemsToCache) > 0 {
-		logger.Debug("Performing batched cache write", "item_count", len(itemsToCache))
-		// Use a background context for the cache write so it doesn't block the response
-		go func() {
-			if err := sh.Cache.MSet(context.Background(), itemsToCache, sh.Config.ContentCacheTTL); err != nil {
+		// Create a deep copy of the items to be cached to prevent a race condition.
+		// The race occurs because the original `finalResults` slice, which `itemsToCache`
+		// points to, gets its objects reset and returned to a sync.Pool immediately
+		// after the response is sent. The background goroutine might then try to
+		// serialize a reset object, leading to empty/corrupted cache entries.
+		itemsToCacheCopy := make(map[string]interface{}, len(itemsToCache))
+		for key, value := range itemsToCache {
+			if originalResult, ok := value.(*extractor.ExtractedResult); ok {
+				// Create a new ExtractedResult and copy the data.
+				// This is a shallow copy of the pointer, but we create a new object
+				// so the original can be pooled without affecting the cache write.
+				copiedResult := *originalResult
+				itemsToCacheCopy[key] = &copiedResult
+			}
+		}
+
+		logger.Debug("Performing batched cache write", "item_count", len(itemsToCacheCopy))
+		// Use a background context for the cache write so it doesn't block the response.
+		// Pass the copied map to the goroutine.
+		go func(items map[string]interface{}) {
+			if err := sh.Cache.MSet(context.Background(), items, sh.Config.ContentCacheTTL); err != nil {
 				slog.Error("Failed to cache items", "error", err)
 			}
-		}()
+		}(itemsToCacheCopy)
 	}
 
 	logger.Info("Finished all extractions", "count", len(finalResults))
