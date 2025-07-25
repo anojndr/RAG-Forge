@@ -10,9 +10,11 @@ import (
 
 // Pool manages a pool of browser instances.
 type Pool struct {
-	launcher *launcher.Launcher
-	browsers chan *rod.Browser
-	mu       sync.Mutex
+	launcher    *launcher.Launcher
+	allBrowsers []*rod.Browser // <-- Track all created browsers
+	activePool  chan *rod.Browser
+	mu          sync.Mutex
+	isClosed    bool // <-- Add a closed flag
 }
 
 // NewPool creates and initializes a new browser pool.
@@ -21,13 +23,15 @@ func NewPool(size int) (*Pool, error) {
 	launcherURL := launcherInstance.MustLaunch()
 
 	pool := &Pool{
-		launcher: launcherInstance,
-		browsers: make(chan *rod.Browser, size),
+		launcher:    launcherInstance,
+		allBrowsers: make([]*rod.Browser, 0, size), // <-- Initialize
+		activePool:  make(chan *rod.Browser, size),
 	}
 
 	for i := 0; i < size; i++ {
 		browser := rod.New().ControlURL(launcherURL).MustConnect()
-		pool.browsers <- browser
+		pool.allBrowsers = append(pool.allBrowsers, browser) // <-- Track it
+		pool.activePool <- browser
 	}
 
 	slog.Info("Browser pool initialized", "size", size)
@@ -36,12 +40,22 @@ func NewPool(size int) (*Pool, error) {
 
 // Get retrieves a browser from the pool.
 func (p *Pool) Get() *rod.Browser {
-	return <-p.browsers
+	return <-p.activePool
 }
 
 // Return gives a browser back to the pool.
 func (p *Pool) Return(browser *rod.Browser) {
-	p.browsers <- browser
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.isClosed {
+		// If the pool is closed, don't try to return the browser.
+		// Just close it directly.
+		browser.MustClose()
+		return
+	}
+
+	p.activePool <- browser
 }
 
 // Cleanup closes all browsers in the pool.
@@ -49,9 +63,16 @@ func (p *Pool) Cleanup() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	close(p.browsers)
+	if p.isClosed {
+		return // Already cleaned up
+	}
 
-	for browser := range p.browsers {
+	slog.Info("Cleaning up browser pool...")
+	p.isClosed = true
+	close(p.activePool)
+
+	// Close ALL browsers the pool has ever created, not just the ones in the channel.
+	for _, browser := range p.allBrowsers {
 		browser.MustClose()
 	}
 	p.launcher.Cleanup()
