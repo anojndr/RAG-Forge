@@ -20,6 +20,7 @@ type RedditExtractor struct {
 	BaseExtractor
 	accessToken string
 	tokenExpiry time.Time
+	tokenMutex  sync.Mutex // Added to protect token access
 }
 
 // NewRedditExtractor creates a new RedditExtractor.
@@ -99,6 +100,9 @@ type RedditTokenResponse struct {
 
 // getAccessToken obtains an OAuth access token for Reddit API
 func (e *RedditExtractor) getAccessToken() error {
+	e.tokenMutex.Lock()
+	defer e.tokenMutex.Unlock()
+
 	if e.Config.RedditClientID == "" || e.Config.RedditClientSecret == "" {
 		return fmt.Errorf("reddit API credentials not configured")
 	}
