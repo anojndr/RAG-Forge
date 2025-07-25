@@ -58,7 +58,8 @@ func main() {
 	defer browserPool.Cleanup()
 
 	// Create a DNS cache
-	dnsCache := goCache.New(5*time.Minute, 10*time.Minute)
+	// Create a DNS cache with manual cleanup
+	dnsCache := goCache.New(5*time.Minute, -1)
 
 	// Create a pool of transports. A size of 4 is a good start.
 	// This gives you an effective MaxIdleConnsPerHost of 4 * 400 = 1600.
@@ -165,6 +166,26 @@ func main() {
 		}
 	}()
 
+	// Manual cache cleanup goroutine
+	cleanupTicker := time.NewTicker(10 * time.Minute)
+	stopCleanup := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-cleanupTicker.C:
+				slog.Info("Running manual cache cleanup")
+				dnsCache.DeleteExpired()
+				if shardedCache, ok := appCache.(*cache.ShardedMemoryCache); ok {
+					shardedCache.DeleteExpired()
+				}
+			case <-stopCleanup:
+				cleanupTicker.Stop()
+				slog.Info("Stopped cache cleanup goroutine")
+				return
+			}
+		}
+	}()
+
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -174,6 +195,9 @@ func main() {
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Signal the cleanup goroutine to stop
+	close(stopCleanup)
 
 	// Shutdown server gracefully
 	if err := server.Shutdown(ctx); err != nil {
@@ -254,6 +278,7 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Vary", "Accept-Encoding")
+		slog.Debug("gzipping response")
 		gw := gzipWriterPool.Get().(*gzip.Writer)
 		gw.Reset(w)
 		defer func() {
@@ -261,6 +286,7 @@ func gzipMiddleware(next http.Handler) http.Handler {
 				slog.Warn("Error closing gzip writer", "error", err)
 			}
 			gzipWriterPool.Put(gw)
+			slog.Debug("gzip writer returned to pool")
 		}()
 		grw := &gzipResponseWriter{ResponseWriter: w, writer: gw}
 		next.ServeHTTP(grw, r)
@@ -275,6 +301,11 @@ type gzipResponseWriter struct {
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.writer.Write(b)
+}
+
+// CloseNotify implements the http.CloseNotifier interface.
+func (w *gzipResponseWriter) CloseNotify() <-chan bool {
+	return w.ResponseWriter.(http.CloseNotifier).CloseNotify()
 }
 
 func (w *gzipResponseWriter) Header() http.Header {

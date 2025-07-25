@@ -21,7 +21,8 @@ func NewShardedMemoryCache(defaultExpiration, cleanupInterval time.Duration) *Sh
 		shards: make([]*cache.Cache, shardCount),
 	}
 	for i := 0; i < shardCount; i++ {
-		c.shards[i] = cache.New(defaultExpiration, cleanupInterval)
+		// Pass -1 for cleanupInterval to prevent go-cache from starting its own janitor.
+		c.shards[i] = cache.New(defaultExpiration, -1)
 	}
 	return c
 }
@@ -108,4 +109,11 @@ func (c *ShardedMemoryCache) MSet(ctx context.Context, items map[string]interfac
 		c.Set(ctx, key, value, duration)
 	}
 	return nil
+}
+
+// DeleteExpired manually deletes expired items from all shards.
+func (c *ShardedMemoryCache) DeleteExpired() {
+	for _, shard := range c.shards {
+		shard.DeleteExpired()
+	}
 }
