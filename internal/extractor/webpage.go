@@ -38,8 +38,12 @@ func (e *WebpageExtractor) Extract(url string, endpoint string, maxChars *int, r
 		colly.UserAgent(useragent.RandomDesktop()),
 	)
 
-	c.SetClient(e.HTTPClient)
-	c.SetRequestTimeout(10 * time.Second)
+	// Create a new http.Client for this request to avoid data races
+	// on the shared client. This is a shallow copy, so it will reuse
+	// the transport (and thus connection pooling).
+	client := *e.HTTPClient
+	client.Timeout = 10 * time.Second
+	c.SetClient(&client)
 
 	var pageTitle string
 	var textContentBuilder strings.Builder
