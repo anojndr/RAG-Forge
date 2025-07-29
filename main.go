@@ -245,8 +245,8 @@ func createTransportPool(size int, dnsCache *goCache.Cache) []*http.Transport {
 				dnsCache.Set(host, ip, goCache.DefaultExpiration)
 				return net.Dial(network, net.JoinHostPort(ip, port))
 			},
-			MaxIdleConns:        2000,
-			MaxIdleConnsPerHost: 400, // This limit is now per-transport
+			MaxIdleConns:          2000,
+			MaxIdleConnsPerHost:   400, // This limit is now per-transport
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,

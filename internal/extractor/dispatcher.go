@@ -145,5 +145,3 @@ func (d *Dispatcher) unimplementedOrFailedInitExtractor(sourceType string, resul
 	result.Error = errMsg
 	return fmt.Errorf("%s", errMsg)
 }
-
-

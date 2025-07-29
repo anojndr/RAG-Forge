@@ -110,6 +110,7 @@ func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, dur
 		slog.Warn("Redis SET failed", "key", key, "error", err)
 	}
 }
+
 // MSet is a batched/pipelined SET for Redis.
 func (c *RedisCache) MSet(ctx context.Context, items map[string]interface{}, duration time.Duration) error {
 	if len(items) == 0 {

@@ -31,7 +31,7 @@ func GetJsoniter() jsoniter.API {
 // ... (Payload structs remain the same) ...
 
 var (
-	requestPayloadPool = sync.Pool{New: func() interface{} { return new(RequestPayload) }}
+	requestPayloadPool        = sync.Pool{New: func() interface{} { return new(RequestPayload) }}
 	extractRequestPayloadPool = sync.Pool{New: func() interface{} { return new(ExtractRequestPayload) }}
 )
 
@@ -64,9 +64,9 @@ type ExtractResponsePayload struct {
 
 // SearchHandler holds dependencies for the search handler.
 type SearchHandler struct {
-	Config          *config.AppConfig
-	SearxNGClient   *searxng.Client
-	Cache           cache.Cache
+	Config            *config.AppConfig
+	SearxNGClient     *searxng.Client
+	Cache             cache.Cache
 	HTTPWorkerPool    *worker.WorkerPool // For lightweight jobs
 	BrowserWorkerPool *worker.WorkerPool // For heavyweight, CPU-bound jobs
 }
@@ -81,9 +81,9 @@ func NewSearchHandler(
 	browserWorkerPool *worker.WorkerPool,
 ) *SearchHandler {
 	return &SearchHandler{
-		Config:          appConfig,
-		SearxNGClient:   searxng.NewClient(appConfig, client),
-		Cache:           appCache,
+		Config:            appConfig,
+		SearxNGClient:     searxng.NewClient(appConfig, client),
+		Cache:             appCache,
 		HTTPWorkerPool:    httpWorkerPool,
 		BrowserWorkerPool: browserWorkerPool,
 	}
@@ -199,7 +199,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 	// --- Batched Cache Lookup ---
 	resultsChan := make(chan *extractor.ExtractedResult, len(urls))
 	var wg sync.WaitGroup
-	
+
 	cachedResults, uncachedURLs := sh.checkContentCache(r.Context(), urls, maxChars)
 	logger.Info("Content cache summary", "total", len(urls), "hits", len(cachedResults), "misses", len(uncachedURLs))
 
@@ -243,7 +243,7 @@ func (sh *SearchHandler) processRequest(w http.ResponseWriter, r *http.Request, 
 
 	// --- Aggregate and respond ---
 	var finalResults []*extractor.ExtractedResult // <-- Change to slice of pointers
-	itemsToCache := make(map[string]interface{})   // Map to hold items for MSet
+	itemsToCache := make(map[string]interface{})  // Map to hold items for MSet
 
 	// The rest of the aggregation logic can remain mostly the same
 	for res := range resultsChan {
@@ -407,7 +407,9 @@ func getContentCacheKey(url string, maxChars *int) string {
 	return sb.String()
 }
 func checkIfErrorIsPermanent(err error) bool {
-	if err == nil { return false }
+	if err == nil {
+		return false
+	}
 	errStr := err.Error()
 	return errors.Is(err, extractor.ErrUnsupportedContentType) || errors.Is(err, extractor.ErrNotPDF) ||
 		strings.Contains(errStr, "404 Not Found") || strings.Contains(errStr, "410 Gone") ||

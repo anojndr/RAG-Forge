@@ -553,12 +553,24 @@ func (e *TwitterExtractor) loadCookies(page *rod.Page, filename string) bool {
 	var cookies []*proto.NetworkCookieParam
 	for _, cookieMap := range cookieData {
 		cookie := &proto.NetworkCookieParam{}
-		if name, ok := cookieMap["name"].(string); ok { cookie.Name = name }
-		if value, ok := cookieMap["value"].(string); ok { cookie.Value = value }
-		if domain, ok := cookieMap["domain"].(string); ok { cookie.Domain = domain }
-		if path, ok := cookieMap["path"].(string); ok { cookie.Path = path }
-		if httpOnly, ok := cookieMap["httpOnly"].(bool); ok { cookie.HTTPOnly = httpOnly }
-		if secure, ok := cookieMap["secure"].(bool); ok { cookie.Secure = secure }
+		if name, ok := cookieMap["name"].(string); ok {
+			cookie.Name = name
+		}
+		if value, ok := cookieMap["value"].(string); ok {
+			cookie.Value = value
+		}
+		if domain, ok := cookieMap["domain"].(string); ok {
+			cookie.Domain = domain
+		}
+		if path, ok := cookieMap["path"].(string); ok {
+			cookie.Path = path
+		}
+		if httpOnly, ok := cookieMap["httpOnly"].(bool); ok {
+			cookie.HTTPOnly = httpOnly
+		}
+		if secure, ok := cookieMap["secure"].(bool); ok {
+			cookie.Secure = secure
+		}
 		cookies = append(cookies, cookie)
 	}
 	page.MustSetCookies(cookies...)

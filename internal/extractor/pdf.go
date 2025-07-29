@@ -152,4 +152,3 @@ func (e *PDFExtractor) detectFileType(data []byte) string {
 
 	return "unknown"
 }
-

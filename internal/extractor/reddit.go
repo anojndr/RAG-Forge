@@ -702,4 +702,3 @@ func (e *RedditExtractor) extractPost(redditURL string, urlInfo *RedditURLInfo, 
 	slog.Info("RedditExtractor: Successfully extracted data via JSON method", "url", redditURL)
 	return nil
 }
-

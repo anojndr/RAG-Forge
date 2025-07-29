@@ -2,9 +2,9 @@ package config
 
 import (
 	"fmt"
-	"time"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -33,15 +33,15 @@ type AppConfig struct {
 	TranscriptServiceURL string
 
 	// Cache configuration
-	CacheType      string
-	RedisURL       string
-	RedisPassword  string
-	RedisDB        int
-	SearchCacheTTL time.Duration
-	ContentCacheTTL time.Duration
-	HTTPWorkerPoolSize       int
-	BrowserPoolSize          int
-	JSExtractionTimeout      time.Duration
+	CacheType           string
+	RedisURL            string
+	RedisPassword       string
+	RedisDB             int
+	SearchCacheTTL      time.Duration
+	ContentCacheTTL     time.Duration
+	HTTPWorkerPoolSize  int
+	BrowserPoolSize     int
+	JSExtractionTimeout time.Duration
 }
 
 // LoadConfig loads configuration from .env file and environment variables
@@ -73,15 +73,15 @@ func LoadConfig() (*AppConfig, error) {
 		TranscriptServiceURL:  getEnv("TRANSCRIPT_SERVICE_URL", "http://127.0.0.1:8000"),
 
 		// Cache configuration
-		CacheType:     getEnv("CACHE_TYPE", "memory"),
-		RedisURL:      os.Getenv("REDIS_URL"),
-		RedisPassword: os.Getenv("REDIS_PASSWORD"),
-		RedisDB:       getEnvAsInt("REDIS_DB", 0),
-		SearchCacheTTL:  getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
-		ContentCacheTTL: getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
-		HTTPWorkerPoolSize:       getEnvAsInt("HTTP_WORKER_POOL_SIZE", 200),
-		BrowserPoolSize:          getEnvAsInt("BROWSER_POOL_SIZE", 4),
-		JSExtractionTimeout:      getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
+		CacheType:           getEnv("CACHE_TYPE", "memory"),
+		RedisURL:            os.Getenv("REDIS_URL"),
+		RedisPassword:       os.Getenv("REDIS_PASSWORD"),
+		RedisDB:             getEnvAsInt("REDIS_DB", 0),
+		SearchCacheTTL:      getEnvAsDuration("SEARCH_CACHE_TTL", 10*time.Minute),
+		ContentCacheTTL:     getEnvAsDuration("CONTENT_CACHE_TTL", 60*time.Minute),
+		HTTPWorkerPoolSize:  getEnvAsInt("HTTP_WORKER_POOL_SIZE", 200),
+		BrowserPoolSize:     getEnvAsInt("BROWSER_POOL_SIZE", 4),
+		JSExtractionTimeout: getEnvAsDuration("JS_EXTRACTION_TIMEOUT", 60*time.Second),
 	}
 
 	if err := config.Validate(); err != nil {

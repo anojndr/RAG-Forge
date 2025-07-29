@@ -222,7 +222,7 @@ func (e *YouTubeExtractor) fetchVideoDetails(videoID string) (string, string, er
 	var videoResponse struct {
 		Items []struct {
 			Snippet struct {
-				Title       string `json:"title"`
+				Title        string `json:"title"`
 				ChannelTitle string `json:"channelTitle"`
 			} `json:"snippet"`
 		} `json:"items"`
@@ -295,7 +295,7 @@ func (e *YouTubeExtractor) fetchPlaylistDetails(playlistID string) (string, stri
 	var playlistResponse struct {
 		Items []struct {
 			Snippet struct {
-				Title       string `json:"title"`
+				Title        string `json:"title"`
 				ChannelTitle string `json:"channelTitle"`
 			} `json:"snippet"`
 		} `json:"items"`
@@ -349,7 +349,6 @@ func (e *YouTubeExtractor) fetchPlaylistItems(playlistID string) ([]map[string]s
 
 	return videoItems, nil
 }
-
 
 // Close is no longer needed as there's no python helper process to terminate.
 func (e *YouTubeExtractor) Close() {}

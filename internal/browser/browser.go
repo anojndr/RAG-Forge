@@ -92,7 +92,7 @@ func NewLauncher() *launcher.Launcher {
 		Set("--disable-plugins-discovery"). // Changed from --disable-plugins
 		Set("--disable-images").
 		Set("--disable-background-networking").
-        // ---- ADD THESE ----
+		// ---- ADD THESE ----
 		Set("--disable-background-timer-throttling").
 		Set("--disable-backgrounding-occluded-windows").
 		Set("--disable-breakpad").
@@ -117,5 +117,5 @@ func NewLauncher() *launcher.Launcher {
 		Set("--enable-automation").
 		Set("--password-store", "basic").
 		Set("--use-mock-keychain")
-        // Note: --disable-javascript-harmony-shipping is deprecated
+	// Note: --disable-javascript-harmony-shipping is deprecated
 }

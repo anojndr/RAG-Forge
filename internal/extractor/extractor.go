@@ -52,10 +52,10 @@ type YouTubePlaylistData struct {
 
 // RedditData represents extracted data from Reddit posts
 type RedditData struct {
-	PostTitle string        `json:"post_title"`
-	PostBody  string        `json:"post_body"`
-	Score     int           `json:"score"`
-	Author    string        `json:"author"`
+	PostTitle string          `json:"post_title"`
+	PostBody  string          `json:"post_body"`
+	Score     int             `json:"score"`
+	Author    string          `json:"author"`
 	Comments  []RedditComment `json:"comments,omitempty"`
 	Posts     []RedditPost    `json:"posts,omitempty"`
 }

@@ -83,7 +83,6 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int,
 	defer waitCancel()
 	page.Context(waitCtx).WaitNavigation(proto.PageLifecycleEventNameNetworkAlmostIdle)()
 
-
 	// Get title
 	info, err := page.Context(ctx).Info()
 	var title string
@@ -104,7 +103,6 @@ func (e *JSWebpageExtractor) Extract(url string, endpoint string, maxChars *int,
 		return fmt.Errorf("failed to evaluate javascript on %s: %w", url, err)
 	}
 	textContent := eval.Value.Str()
-
 
 	slog.Info("JSWebpageExtractor: Finished scraping", "url", url, "title", title, "text_length", len(textContent))
 
