@@ -47,7 +47,11 @@ Before you begin, ensure you have the following dependencies installed.
 ### System Dependencies
 
 -   **Go**: Version 1.23.1 or higher.
--   **`pdftotext`**: Required for PDF text extraction. On Debian/Ubuntu, install with `sudo apt-get install poppler-utils`.
+-   **Python**: Version 3.8 or higher (for the transcript service).
+-   **`pdftotext`**: Required for PDF text extraction.
+    -   On **Debian/Ubuntu**: `sudo apt-get install poppler-utils`
+    -   On **macOS** (with Homebrew): `brew install poppler`
+    -   On **Windows**: Download the latest [Poppler for Windows binaries](https://github.com/oschwartz10612/poppler-windows/releases/), unzip the archive, and add the full path to the `bin` directory (e.g., `C:\path\to\poppler-24.02.0\bin`) to your system's `PATH` environment variable.
 -   **Chromium-based Browser**: Required for the `/extract` endpoint and Twitter/X features. Install Google Chrome, Chromium, or another compatible browser.
 
 ### Application Setup
@@ -76,7 +80,7 @@ Configuration is managed via a `.env` file in the project root.
 
 | Variable                  | Description                                                                                               | Default                            | Required?                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
-| `PORT`                    | The port for the API server. *Note: The port is currently hardcoded to `8086` in `main.go` and `docker-compose.yml`.* | `8080`                             | No                                 |
+| `PORT`                    | The port for the API server.                                                                              | `8080`                             | No                                 |
 | `MAIN_SEARCH_ENGINE`      | The primary search engine. Can be `searxng` or `serper`.                                                    | `searxng`                          | No                                 |
 | `FALLBACK_SEARCH_ENGINE`  | The fallback engine if the primary fails. Can be `searxng`, `serper`, or empty.                           | `serper`                           | No                                 |
 | `SEARXNG_URL`             | The URL of your running SearxNG instance.                                                                 | `http://127.0.0.1:18088`           | If using `searxng`                 |
@@ -97,19 +101,21 @@ Configuration is managed via a `.env` file in the project root.
 
 ## Running the API
 
-The API server runs on port `8086`. There are two recommended ways to run the application and its microservice.
+The API server runs on port `8086`. Convenience scripts are provided to set up and run both the main Go API and the Python microservice.
 
-A convenience script, `run.sh`, is provided to set up and run both services locally. This script will:
-1. Create a Python virtual environment for the transcript service.
-2. Install its dependencies from `requirements.txt`.
-3. Start the Python service in the background.
-4. Start the Go API server.
-
-To use it, simply run:
+#### On Linux or macOS
+The script will create a Python virtual environment, install dependencies, and manage both processes.
 ```bash
 ./run.sh
 ```
-The script handles graceful shutdown of both processes when you stop it (e.g., with `Ctrl+C`).
+
+#### On Windows
+Use the equivalent batch script.
+```cmd
+run.bat
+```
+
+The scripts handle graceful shutdown of both processes when you stop them (e.g., with `Ctrl+C`).
 
 ## API Reference
 
@@ -305,8 +311,12 @@ if __name__ == "__main__":
 -   **YouTube transcript extraction fails**:
 	-   Ensure the service is running and accessible from the main Go application at the `TRANSCRIPT_SERVICE_URL`.
 -   **Server fails to start with "address already in use"**:
-	-   Another process is using port `8086`. Stop the other process or change the hardcoded port in `main.go`.
+	-   Another process is using port `8086`. Stop the other process or change the port in `main.go`.
 
 ## Development & Testing
 
-Use standard Go commands for development (`go build`, `go test`, `go run main.go`). The build and run process is now primarily managed through the provided `run.sh` script.
+Use standard Go commands for development (`go build`, `go test`, `go run main.go`). The build and run process is now primarily managed through the provided `run.sh` (Linux/macOS) and `run.bat` (Windows) scripts.
+
+To run tests:
+-   **Linux/macOS**: `./test.sh`
+-   **Windows**: `test.bat`

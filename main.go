@@ -24,7 +24,6 @@ import (
 	_ "github.com/joho/godotenv/autoload" // Automatically load .env file
 	goCache "github.com/patrickmn/go-cache"
 	_ "go.uber.org/automaxprocs"
-	"golang.org/x/sys/unix"
 )
 
 var gzipWriterPool = sync.Pool{
@@ -124,43 +123,21 @@ func main() {
 	handler := gzipMiddleware(timeoutMiddleware(mux))
 	requestIDHandler := requestIDMiddleware(handler)
 
-	// Create a custom listener config
-	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			var sockOptErr error
-			err := c.Control(func(fd uintptr) {
-				// Set SO_REUSEPORT on the socket
-				sockOptErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			})
-			if err != nil {
-				return err
-			}
-			return sockOptErr
-		},
-	}
-
-	// Use the custom listener config
-	listener, err := lc.Listen(context.Background(), "tcp", ":8086")
-	if err != nil {
-		slog.Error("Failed to create listener", "error", err)
-		os.Exit(1)
-	}
-
 	server := &http.Server{
-		Addr:         ":8086", // Addr is now mainly for reference
+		Addr:         ":8086",
 		Handler:      requestIDHandler,
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in a goroutine with the custom listener
+	// Start server in a goroutine
 	go func() {
 		slog.Info("Starting server", "port", 8086)
 		slog.Info("Available endpoints", "endpoints", []string{"POST /search", "POST /extract", "GET /health"})
 
-		// Use Serve instead of ListenAndServe
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		// Use standard ListenAndServe for cross-platform compatibility
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("Server failed to start", "error", err)
 			os.Exit(1)
 		}
@@ -301,11 +278,6 @@ type gzipResponseWriter struct {
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.writer.Write(b)
-}
-
-// CloseNotify implements the http.CloseNotifier interface.
-func (w *gzipResponseWriter) CloseNotify() <-chan bool {
-	return w.ResponseWriter.(http.CloseNotifier).CloseNotify()
 }
 
 func (w *gzipResponseWriter) Header() http.Header {

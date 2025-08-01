@@ -18,7 +18,7 @@ The API is architected for performance and compatibility, featuring a decoupled 
     *   **YouTube**: Extracts video title, channel name, and top comments. Full video transcripts are fetched via a dedicated, high-performance Python microservice.
     *   **Reddit**: Fetches post title, body, and comments. Also supports extracting recent posts from subreddit and user profile URLs.
     *   **PDFs**: Extracts clean text content from PDF documents.
-    *   **Webpages**: Scrapes and cleans the main textual content from articles, blogs, and dynamic single-page applications.
+    -   **Webpages**: Scrapes and cleans the main textual content from articles, blogs, and dynamic single-page applications.
 *   **Flexible Search Backend**:
     *   Integrates with a self-hosted **SearxNG** instance or the **Serper.dev** Google Search API.
     *   Supports a primary and fallback search engine configuration.
@@ -55,11 +55,14 @@ A high-level overview of the main directories and key files:
 To run this project, you need the following installed:
 
 *   **Go**: Version 1.23.1 or higher.
+*   **Python**: Version 3.8 or higher.
 *   **External Tools**:
-	*   **`pdftotext`**: For PDF extraction (from the `poppler-utils` package on Linux).
+	*   **`pdftotext`**: For PDF extraction.
+        - **Windows**: Download [Poppler binaries](https://github.com/oschwartz10612/poppler-windows/releases/), unzip, and add the `bin` folder to your system `PATH`.
+        - **Linux**: `sudo apt-get install poppler-utils`
+        - **macOS**: `brew install poppler`
 	*   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
-*   **Search Engine**:
-	*   A running **SearxNG** instance OR a **Serper API** key.
+*   **Search Engine**: A running **SearxNG** instance OR a **Serper API** key.
 
 For detailed installation instructions, please refer to the **[Installation section in DOCS.md](DOCS.md)**.
 
@@ -71,22 +74,24 @@ For detailed installation instructions, please refer to the **[Installation sect
     cd RAG-Forge
     ```
 
-2.  **Install System Dependencies:**
-    Follow the detailed installation guide in **[DOCS.md](DOCS.md)** to install `poppler-utils` and a browser.
-
-3.  **Configure Your Environment:**
+2.  **Configure Your Environment:**
     Copy the example environment file and edit it with your own settings (API keys, URLs, credentials).
     ```bash
     cp ENV_EXAMPLE.TXT .env
+    # On Windows, use: copy ENV_EXAMPLE.TXT .env
     nano .env
     ```
 
-4.  **Run the Application:**
-    There are two ways to run the application:
+3.  **Run the Application:**
+    Use the script for your operating system. It will set up the Python environment and run both services.
    
-    A convenience script is provided to run both services locally. It will set up a Python virtual environment and manage both processes.
+    **On Linux/macOS:**
     ```bash
     ./run.sh
+    ```
+    **On Windows:**
+    ```cmd
+    run.bat
     ```
 
 ## API Usage
