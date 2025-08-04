@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"context"
+	"flag"
 	"log/slog"
 	"net"
 	"net/http"
@@ -37,6 +38,12 @@ type contextKey string
 const requestIDKey contextKey = "requestID"
 
 func main() {
+	// Define a command-line flag to specify which endpoint to run.
+	// This allows for running only a specific service (e.g., "extract" or "search").
+	// The default value is "all", which runs all available endpoints.
+	endpoint := flag.String("endpoint", "all", "The endpoint to run (e.g., 'extract', 'search', 'all').")
+	flag.Parse()
+
 	// Setup high-performance structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -105,19 +112,28 @@ func main() {
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
-	mux.HandleFunc("/search", searchHandler.HandleSearch)
-	mux.HandleFunc("/extract", searchHandler.HandleExtract)
+	// Conditionally register endpoints based on the 'endpoint' flag.
+	// This allows for running a specific service or all services.
+	availableEndpoints := []string{}
+	if *endpoint == "all" || *endpoint == "search" {
+		mux.HandleFunc("/search", searchHandler.HandleSearch)
+		availableEndpoints = append(availableEndpoints, "POST /search")
+	}
+	if *endpoint == "all" || *endpoint == "extract" {
+		mux.HandleFunc("/extract", searchHandler.HandleExtract)
+		availableEndpoints = append(availableEndpoints, "POST /extract")
+	}
 
-	// Add health check endpoint
+	// The /health endpoint is always available, regardless of the selected service.
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// Use jsoniter for consistency and performance
 		jsoniter := api.GetJsoniter()
 		if err := jsoniter.NewEncoder(w).Encode(map[string]string{"status": "healthy", "timestamp": time.Now().Format(time.RFC3339)}); err != nil {
 			slog.Warn("Failed to write health check response", "error", err)
 		}
 	})
+	availableEndpoints = append(availableEndpoints, "GET /health")
 
 	// Create compression and timeout middleware
 	handler := gzipMiddleware(timeoutMiddleware(mux))
@@ -134,7 +150,7 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		slog.Info("Starting server", "port", 8086)
-		slog.Info("Available endpoints", "endpoints", []string{"POST /search", "POST /extract", "GET /health"})
+		slog.Info("Available endpoints", "endpoints", availableEndpoints)
 
 		// Use standard ListenAndServe for cross-platform compatibility
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -117,6 +117,20 @@ run.bat
 
 The scripts handle graceful shutdown of both processes when you stop them (e.g., with `Ctrl+C`).
 
+### Running a Single Service
+If you only need to run a specific service (e.g., only the `/extract` endpoint), you can use the dedicated run scripts. These scripts launch only the Go application without the Python transcript service, saving resources.
+
+-   **Linux/macOS (Extract only)**:
+    ```bash
+    ./run_extract.sh
+    ```
+-   **Windows (Extract only)**:
+    ```cmd
+    run_extract.bat
+    ```
+
+This is useful for scenarios where you do not need search functionality or YouTube transcriptions.
+
 ## API Reference
 
 The API serves JSON and follows standard HTTP conventions. A successful request to `/search` or `/extract` will return a `200 OK` status, even if some individual URLs failed to process. Failures are reported within the `results` array of the JSON response.
