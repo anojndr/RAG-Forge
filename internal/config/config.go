@@ -26,9 +26,6 @@ type AppConfig struct {
 	WebshareProxyPassword string
 	// Comma-separated order for transcript extraction methods: ytapi, tactiq
 	TranscriptOrder string
-	// Twitter/X credentials for content extraction
-	TwitterUsername string
-	TwitterPassword string
 	// URL for the transcript microservice
 	TranscriptServiceURL string
 
@@ -68,8 +65,6 @@ func LoadConfig() (*AppConfig, error) {
 		WebshareProxyUsername: os.Getenv("WEBSHARE_PROXY_USERNAME"),
 		WebshareProxyPassword: os.Getenv("WEBSHARE_PROXY_PASSWORD"),
 		TranscriptOrder:       getEnv("YOUTUBE_TRANSCRIPT_ORDER", "ytapi,tactiq"),
-		TwitterUsername:       os.Getenv("TWITTER_USERNAME"),
-		TwitterPassword:       os.Getenv("TWITTER_PASSWORD"),
 		TranscriptServiceURL:  getEnv("TRANSCRIPT_SERVICE_URL", "http://127.0.0.1:8000"),
 
 		// Cache configuration
@@ -122,9 +117,6 @@ func (c *AppConfig) Validate() error {
 		fmt.Println("Warning: Reddit API credentials not set - Reddit features will be limited")
 	}
 
-	if c.TwitterUsername == "" || c.TwitterPassword == "" {
-		fmt.Println("Warning: Twitter credentials not set - Twitter/X features will be limited")
-	}
 
 	// Warn about incomplete Webshare proxy credentials
 	if (c.WebshareProxyUsername != "" && c.WebshareProxyPassword == "") || (c.WebshareProxyUsername == "" && c.WebshareProxyPassword != "") {
@@ -163,10 +155,6 @@ func (c *AppConfig) HasSerperConfig() bool {
 	return c.SerperAPIKey != ""
 }
 
-// HasTwitterConfig returns true if Twitter credentials are available
-func (c *AppConfig) HasTwitterConfig() bool {
-	return c.TwitterUsername != "" && c.TwitterPassword != ""
-}
 
 // getEnv gets an environment variable or returns a default value
 func getEnv(key, fallback string) string {

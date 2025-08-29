@@ -71,25 +71,6 @@ type WebpageData struct {
 	Title       string `json:"title,omitempty"`
 }
 
-// TwitterData represents extracted data from Twitter/X posts
-type TwitterData struct {
-	TweetContent  string           `json:"tweet_content"`
-	TweetAuthor   string           `json:"tweet_author"`
-	Comments      []TwitterComment `json:"comments"`
-	TotalComments int              `json:"total_comments"`
-}
-
-// TwitterComment represents a comment/reply on a Twitter/X post
-type TwitterComment struct {
-	Author    string `json:"author"`
-	Username  string `json:"username"`
-	Content   string `json:"content"`
-	Timestamp string `json:"timestamp"`
-	Likes     string `json:"likes"`
-	Replies   string `json:"replies"`
-	Retweets  string `json:"retweets"`
-}
-
 // ContentExtractor defines the interface for content extractors.
 // This interface is kept small and focused on a single responsibility.
 type ContentExtractor interface {

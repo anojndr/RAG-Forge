@@ -14,10 +14,9 @@ The API is architected for performance and compatibility, featuring a decoupled 
     *   `POST /search`: Searches the web and extracts content from the top results using a fast, non-JS-rendering scraper. Ideal for processing articles and blogs at scale.
     *   `POST /extract`: Extracts content directly from a list of provided URLs, using a JS-enabled headless browser for maximum compatibility with modern websites and single-page applications.
 *   **Multi-Source Content Extraction**: Automatically detects and handles different content types:
-    *   **Twitter/X**: Extracts full post content and comments via browser automation. The `/extract` endpoint also supports fetching the latest tweets from user profile URLs.
-    *   **YouTube**: Extracts video title, channel name, and top comments. Full video transcripts are fetched via a dedicated, high-performance Python microservice.
-    *   **Reddit**: Fetches post title, body, and comments. Also supports extracting recent posts from subreddit and user profile URLs.
-    *   **PDFs**: Extracts clean text content from PDF documents.
+*   **YouTube**: Extracts video title, channel name, and top comments. Full video transcripts are fetched via a dedicated, high-performance Python microservice.
+*   **Reddit**: Fetches post title, body, and comments. Also supports extracting recent posts from subreddit and user profile URLs.
+*   **PDFs**: Extracts clean text content from PDF documents.
     -   **Webpages**: Scrapes and cleans the main textual content from articles, blogs, and dynamic single-page applications.
 *   **Flexible Search Backend**:
     *   Integrates with a self-hosted **SearxNG** instance or the **Serper.dev** Google Search API.
@@ -61,7 +60,7 @@ To run this project, you need the following installed:
         - **Windows**: Download [Poppler binaries](https://github.com/oschwartz10612/poppler-windows/releases/), unzip, and add the `bin` folder to your system `PATH`.
         - **Linux**: `sudo apt-get install poppler-utils`
         - **macOS**: `brew install poppler`
-	*   **Chromium-based browser**: For Twitter/X extraction (e.g., Google Chrome, Chromium).
+    *   **Chromium-based browser**: For JS-enabled extraction of dynamic webpages.
 *   **Search Engine**: A running **SearxNG** instance OR a **Serper API** key.
 
 For detailed installation instructions, please refer to the **[Installation section in DOCS.md](DOCS.md)**.
@@ -108,16 +107,7 @@ curl -X POST http://127.0.0.1:8086/search \
 }'
 ```
 
-**Example: Extract content from a Twitter/X URL (compatibility mode)**
-```bash
-curl -X POST http://127.0.0.1:8086/extract \
--H "Content-Type: application/json" \
--d '{
-  "urls": [
-    "https://x.com/gvanrossum/status/1798372418833441227"
-  ]
-}'
-```
+<!-- Twitter/X extraction removed from project -->
 
 ## Complete Documentation
 

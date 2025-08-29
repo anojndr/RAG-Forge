@@ -26,16 +26,15 @@ Welcome to the complete documentation for RAG-Forge, a web content extraction AP
 
 -   **Dual Extraction Modes**:
     -   `/search`: **Optimized for speed.** Uses a fast, non-JS-rendering extractor for quickly processing large volumes of standard web articles from search results.
-    -   `/extract`: **Optimized for compatibility.** Uses a full JS-enabled headless browser to handle complex, dynamic sites, single-page apps, and sources like Twitter/X.
--   **Multi-Source Support**: Automatically extracts content from YouTube (videos), Reddit (posts, subreddits, user profiles), Twitter/X (tweets and user profiles), PDFs, and standard webpages.
+  -   `/extract`: **Optimized for compatibility.** Uses a full JS-enabled headless browser to handle complex, dynamic sites and single-page apps.
+-   **Multi-Source Support**: Automatically extracts content from YouTube (videos), Reddit (posts, subreddits, user profiles), PDFs, and standard webpages.
 -   **Flexible Search Backend**: Use a self-hosted **SearxNG** instance or the commercial **Serper.dev** API. Supports a primary and fallback configuration.
--   **Intelligent Extraction**:
-    -   **Twitter/X**: Uses browser automation to log in and scrape full post content and comments. The `/extract` endpoint can also fetch the latest ~5 tweets from a user's profile page. Session cookies are saved to accelerate subsequent requests.
-    -   **YouTube**: Fetches metadata/comments via the official API and gets full transcripts from a dedicated Python microservice for high performance and reliability.
+ -   **Intelligent Extraction**:
+   -   **YouTube**: Fetches metadata/comments via the official API and gets full transcripts from a dedicated Python microservice for high performance and reliability.
     -   **Reddit**: Intelligently parses different Reddit URL types (posts, subreddits, user profiles) and extracts actual content, filtering out "load more" placeholders.
 -   **Decoupled & Optimized Architecture**:
-    -   **Transcript Microservice**: YouTube transcript extraction is handled by a separate, containerized Python FastAPI service, improving performance, scalability, and stability.
-    -   **Dual Worker Pools**: Employs two separate worker pools—a large one for fast, I/O-bound jobs (standard webpages, APIs) and a smaller one for slow, CPU-bound jobs (JS rendering, Twitter/X)—to ensure high throughput.
+  -   **Transcript Microservice**: YouTube transcript extraction is handled by a separate, containerized Python FastAPI service, improving performance, scalability, and stability.
+  -   **Dual Worker Pools**: Employs two separate worker pools—a large one for fast, I/O-bound jobs (standard webpages, APIs) and a smaller one for slow, CPU-bound jobs (JS rendering)—to ensure high throughput.
     -   **Advanced Caching**: Implements a two-level caching system (sharded in-memory or Redis) with batched reads/writes for both search queries and URL content.
 -   **Structured Output**: Returns clean, structured JSON data, perfect for feeding into LLMs or RAG systems.
 -   **Health Check**: Includes a `/health` endpoint for easy integration with monitoring and orchestration tools.
@@ -52,7 +51,7 @@ Before you begin, ensure you have the following dependencies installed.
     -   On **Debian/Ubuntu**: `sudo apt-get install poppler-utils`
     -   On **macOS** (with Homebrew): `brew install poppler`
     -   On **Windows**: Download the latest [Poppler for Windows binaries](https://github.com/oschwartz10612/poppler-windows/releases/), unzip the archive, and add the full path to the `bin` directory (e.g., `C:\path\to\poppler-24.02.0\bin`) to your system's `PATH` environment variable.
--   **Chromium-based Browser**: Required for the `/extract` endpoint and Twitter/X features. Install Google Chrome, Chromium, or another compatible browser.
+-   **Chromium-based Browser**: Required for the `/extract` endpoint for dynamic JS-heavy sites. Install Google Chrome, Chromium, or another compatible browser.
 
 ### Application Setup
 
@@ -90,8 +89,6 @@ Configuration is managed via a `.env` file in the project root.
 | `YOUTUBE_TRANSCRIPT_ORDER`| Comma-separated order of transcript methods. Valid entries: `ytapi` (microservice), `tactiq`.           | `ytapi,tactiq`                     | No                                 |
 | `REDDIT_CLIENT_ID`        | Your Reddit app client ID.                                                                                | (none)                             | For Reddit features                |
 | `REDDIT_CLIENT_SECRET`    | Your Reddit app client secret.                                                                            | (none)                             | For Reddit features                |
-| `TWITTER_USERNAME`        | Your Twitter/X username or email for logging in.                                                          | (none)                             | For Twitter/X features             |
-| `TWITTER_PASSWORD`        | Your Twitter/X password.                                                                                  | (none)                             | For Twitter/X features             |
 | `CACHE_TYPE`              | Cache type to use. Valid values: `memory`, `redis`.                                                       | `memory`                           | No                                 |
 | `REDIS_URL`               | Redis connection URL.                                                                                     | `127.0.0.1:6379`                   | If using `redis`                   |
 | `SEARCH_CACHE_TTL`        | Cache duration for search results (e.g., `10m`, `1h`).                                                     | `10m`                              | No                                 |
@@ -165,7 +162,7 @@ curl -X POST http://127.0.0.1:8086/search \
 
 ### POST /extract
 
-Extracts content directly from a list of provided URLs. This endpoint is **optimized for compatibility** and **always uses a JS-enabled headless browser** to ensure it can handle modern, dynamic websites (like Twitter/X or single-page apps).
+Extracts content directly from a list of provided URLs. This endpoint is **optimized for compatibility** and **always uses a JS-enabled headless browser** to ensure it can handle modern, dynamic websites and single-page apps.
 
 -   **Method**: `POST`
 -   **Path**: `/extract`
@@ -183,9 +180,8 @@ curl -X POST http://127.0.0.1:8086/extract \
 -H "Content-Type: application/json" \
 -d '{
   "urls": [
-    "https://www.youtube.com/watch?v=...",
-    "https://www.reddit.com/r/MachineLearning/comments/...",
-    "https://x.com/some_user/status/1234567890"
+  "https://www.youtube.com/watch?v=...",
+  "https://www.reddit.com/r/MachineLearning/comments/..."
   ]
 }'
 ```
@@ -220,7 +216,7 @@ This object represents the outcome of processing a single URL.
 | Field                   | Type        | Description                                                                                             |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | `url`                   | string      | The URL that was processed.                                                                             |
-| `source_type`           | string      | Detected type: `youtube`, `reddit`, `pdf`, `twitter`, `twitter_profile`, `webpage`, or `webpage_js`. |
+| `source_type`           | string      | Detected type: `youtube`, `reddit`, `pdf`, `webpage`, or `webpage_js`. |
 | `processed_successfully`| boolean     | `true` if content was extracted successfully, `false` otherwise.                                        |
 | `data`                  | object      | The extracted content. The structure depends on the `source_type`. See below.                         |
 | `error`                 | string      | An error message if `processed_successfully` is `false`. `null` otherwise.                              |
@@ -230,8 +226,7 @@ This object represents the outcome of processing a single URL.
 -   **`pdf`**: `{ "text_content": "..." }`
 -   **`youtube`**: `{ "title": "...", "channel_name": "...", "transcript": "...", "comments": [...] }`
 -   **`reddit`**: `{ "post_title": "...", "post_body": "...", "author": "...", "comments": [...], "posts": [...] }` (Either `comments` or `posts` will be populated for posts vs. subreddit/user profiles).
--   **`twitter`**: `{ "tweet_content": "...", "tweet_author": "...", "comments": [...], "total_comments": ... }`
--   **`twitter_profile`**: `{ "profile_url": "...", "latest_tweets": [ { "url": "...", "data": <TwitterData> }, ... ] }`
+<!-- Twitter source types removed -->
 
 #### `FinalResponsePayload` (for `/search`)
 ```json
@@ -318,10 +313,7 @@ if __name__ == "__main__":
     -   Verify your `MAIN_SEARCH_ENGINE` is configured correctly in `.env`.
     -   If using SearxNG, ensure the instance at `SEARXNG_URL` is running and accessible.
     -   If using Serper, double-check that `SERPER_API_KEY` is correct.
--   **Twitter/X extraction fails**:
-    -   Ensure a Chromium-based browser is installed and accessible in your system's PATH.
-    -   Make sure your `TWITTER_USERNAME` and `TWITTER_PASSWORD` are correct.
-    -   On the first run, the API saves login cookies to `twitter_cookies.json`. If login fails repeatedly, **delete `twitter_cookies.json`** to force a fresh login attempt.
+<!-- Twitter troubleshooting removed -->
 -   **YouTube transcript extraction fails**:
 	-   Ensure the service is running and accessible from the main Go application at the `TRANSCRIPT_SERVICE_URL`.
 -   **Server fails to start with "address already in use"**:

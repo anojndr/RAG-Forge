@@ -46,8 +46,6 @@ func NewDispatcher(appConfig *config.AppConfig, browserPool *browser.Pool, clien
 
 	d.register("reddit.com", NewRedditExtractor(appConfig, client))
 	d.register("redd.it", NewRedditExtractor(appConfig, client))
-	d.register("twitter.com", NewTwitterExtractor(appConfig, browserPool, client))
-	d.register("x.com", NewTwitterExtractor(appConfig, browserPool, client))
 	d.register(".pdf", NewPDFExtractor(appConfig, client))
 	d.register("webpage", NewWebpageExtractor(appConfig, client))
 

@@ -34,7 +34,7 @@ echo.
 
 echo --- [3/3] Testing 'extract' endpoint (Multiple URLs) ---
 echo Extracting multiple URLs...
-curl -f -s -X POST "%BASE_URL%/extract" -H "Content-Type: application/json" -d "{\"urls\": [\"https://www.youtube.com/watch?v=dcBvK3duCrA\", \"https://x.com/_wonuwo/status/1948236043628556509\"]}"
+curl -f -s -X POST "%BASE_URL%/extract" -H "Content-Type: application/json" -d "{\"urls\": [\"https://www.youtube.com/watch?v=dcBvK3duCrA\", \"https://cachyos.org/\"]}"
 if %errorlevel% neq 0 (
     echo.
     echo ❌ Test Failed.
