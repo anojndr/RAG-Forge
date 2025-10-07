@@ -28,8 +28,8 @@ def _format_fetched_transcript(snippets: Iterable) -> str:
             parts.append(text.strip())
     return " ".join(filter(None, parts)).strip()
 
-async def fetch_transcript_sync(video_id: str):
-    """A synchronous wrapper for the blocking library call."""
+def fetch_transcript_sync(video_id: str):
+    """Fetch a transcript using the blocking youtube-transcript-api."""
     try:
         fetched_transcript = ytt_api.fetch(
             video_id,
